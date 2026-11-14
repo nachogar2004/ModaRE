@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  #mapa { height:520px; border-radius:10px; border:1px solid var(--line); }
+  tr.ruta { cursor:pointer; } tr.ruta:hover { background:#f5f5f4; } tr.sel { background:var(--acc-2) !important; }
+  .sw { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; }
+</style>
+{% endblock %}
+{% block body %}
+{% set r = plan.resumen %}
+<h1>Plan de rutas · {{ semana }}</h1>
+<p class="muted">Demanda: {{ r.fuente }} ({{ r.pedidos_app }} pedidos de la app) · asignación {{ r.asignacion }} ·
+  {{ r.segundos_por_planta }} s/planta · calculado en {{ r.segundos_calculo }} s ·
+  <a href="{{ url_for('paradas_csv', semana=semana) }}">descargar paradas.csv</a> · <a href="{{ url_for('central', semana=semana) }}">volver</a></p>
+
+<div class="kpis card">
+  <div class="kpi"><div class="v">{{ '{:,.0f}'.format(r.coste_eur) }} €</div><div class="l">coste total ({{ r.eur_por_kg }} €/kg)</div></div>
+  <div class="kpi"><div class="v">{{ r.rutas }} / {{ r.camiones }}</div><div class="l">rutas / camiones físicos</div></div>
+  <div class="kpi"><div class="v">{{ '{:,.0f}'.format(r.km) }}</div><div class="l">km</div></div>
+  <div class="kpi"><div class="v">{{ '{:,.0f}'.format(r.litros) }} L</div><div class="l">gasóleo</div></div>
+  <div class="kpi"><div class="v">{{ '{:,.1f}'.format(r.co2_kg / 1000) }} t</div><div class="l">CO₂e</div></div>
+  <div class="kpi"><div class="v">{{ '%.1f'|format(100 * r.nivel_servicio) }} %</div><div class="l">servicio (objetivo {{ '%.0f'|format(100 * r.nivel_servicio_objetivo) }} %)</div></div>
+  <div class="kpi"><div class="v">{{ '%.0f'|format(100 * r.ocupacion_media_cajas) }} %</div><div class="l">ocupación media</div></div>
+  <div class="kpi"><div class="v">{{ r.pernoctas }}</div><div class="l">pernoctas</div></div>
+</div>
+
+<div class="card"><div id="mapa"></div><p class="muted">Pincha una ruta de la tabla para resaltarla. Las líneas son rectas entre paradas (no el trazado por carretera).</p></div>
+
+<div class="card">
+  <h2>Rutas</h2>
+  <div class="scroll"><table id="tabla">
+    <tr><th>Ruta</th><th>Camión</th><th>Salida → vuelta</th><th class="n">Paradas</th><th class="n">kg</th><th class="n">Ocup.</th>
+        <th class="n">km</th><th class="n">h</th><th class="n">Noches</th><th class="n">L/100km</th><th class="n">CO₂ kg</th><th class="n">€</th><th>Avisos</th></tr>
+    {% for x in plan.rutas %}
+    <tr class="ruta" data-i="{{ loop.index0 }}">
+      <td><span class="sw" data-c="{{ loop.index0 }}"></span>{{ x.nombre or x.id }}</td><td>{{ x.tipo }} <span class="pill">{{ x.operador }}</span></td>
+      <td>{{ x.salida }} → {{ x.vuelta }}</td><td class="n">{{ x.n_paradas }}</td><td class="n">{{ '%.0f'|format(x.kg) }}</td>
+      <td class="n">{{ '%.0f'|format(100 * x.ocupacion_cajas) }} %</td><td class="n">{{ '%.0f'|format(x.km) }}</td>
+      <td class="n">{{ x.horas_trabajo }}</td><td class="n">{{ x.noches }}</td><td class="n">{{ x.l_100km }}</td>
+      <td class="n">{{ '%.0f'|format(x.co2_kg) }}</td><td class="n">{{ '%.0f'|format(x.coste_eur) }}</td>
+      <td class="warn">{{ x.avisos|join('; ') }}</td>
+    </tr>
+    <tr class="det" data-i="{{ loop.index0 }}" hidden><td colspan="13"><table>
+      <tr><th>#</th><th>Tienda</th><th>Municipio</th><th class="n">Cajas</th><th class="n">kg</th><th>Llegada</th><th>Descarga</th><th>Ventana</th></tr>
+      {% for p in x.paradas %}<tr><td>{{ loop.index }}</td><td>{{ p.nombre }}</td><td>{{ p.municipio }}</td><td class="n">{{ p.cajas }}</td>
+        <td class="n">{{ p.kg }}</td><td>{{ p.llegada }}</td><td>{{ p.inicio_descarga }}</td>
+        <td class="{{ 'ok' if p.a_tiempo else 'err' }}">{{ p.ventana }}</td></tr>{% endfor %}
+    </table></td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+
+<div class="row">
+  <div class="card"><h2>Flota necesaria</h2><table>
+    <tr><th>Planta</th><th>Tarifa</th><th class="n">Rutas</th><th class="n">Camiones</th></tr>
+    {% for f in plan.flota %}<tr><td>{{ f.planta }}</td><td>{{ f.tarifa }}</td><td class="n">{{ f.rutas }}</td><td class="n">{{ f.camiones }}</td></tr>{% endfor %}
+  </table><p class="muted">Camiones físicos = máximo de rutas simultáneas: un camión puede hacer varias rutas en la semana.</p></div>
+  <div class="card"><h2>Plantas</h2><table>
+    <tr><th>Planta</th><th class="n">Tiendas</th><th class="n">kg</th><th class="n">Capacidad</th></tr>
+    {% for p in plan.plantas %}<tr><td>{{ p.nombre }}</td><td class="n">{{ p.tiendas }}</td><td class="n">{{ '%.0f'|format(p.kg) }}</td><td class="n">{{ '%.0f'|format(p.capacidad) }}</td></tr>{% endfor %}
+  </table></div>
+</div>
+
+{% if plan.no_servidas or plan.avisos %}
+<div class="card"><h2>Pendiente</h2><ul>
+  {% for n in plan.no_servidas %}<li class="err">Sin servir: {{ n.nombre }} ({{ n.visita }}, {{ n.kg }} kg)</li>{% endfor %}
+  {% for a in plan.avisos %}<li class="warn">{{ a.nombre }} ({{ a.kg }} kg): {{ a.motivo }}</li>{% endfor %}
+</ul></div>
+{% endif %}
+
+<script>
+const PLAN = {{ plan|tojson }};
+const COL = ["#0f766e","#b45309","#7c3aed","#be123c","#1d4ed8","#4d7c0f","#c2410c","#0e7490","#a21caf","#475569"];
+const mapa = L.map("mapa").setView([40.2, -3.5], 6);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {attribution: "© OpenStreetMap"}).addTo(mapa);
+const plantas = Object.fromEntries([...PLAN.plantas, ...(PLAN.almacenes || [])].map(p => [p.id, p]));
+PLAN.plantas.forEach(p => L.marker([p.lat, p.lon]).addTo(mapa).bindPopup(`<b>${p.nombre}</b><br>${Math.round(p.kg)} / ${p.capacidad} kg`));
+const capas = PLAN.rutas.map((r, i) => {
+  const pl = plantas[r.origen || r.planta], c = COL[i % COL.length];
+  const pts = [[pl.lat, pl.lon], ...r.paradas.map(p => [p.lat, p.lon]), [pl.lat, pl.lon]];
+  const g = L.layerGroup([L.polyline(pts, {color: c, weight: 3, opacity: .75})]);
+  r.paradas.forEach((p, k) => g.addLayer(L.circleMarker([p.lat, p.lon], {radius: 5, color: c, fillOpacity: .9})
+    .bindPopup(`<b>${p.nombre}</b><br>${r.nombre || r.id} · parada ${k + 1}<br>${p.cajas} cajas · ${p.inicio_descarga}`)));
+  return g.addTo(mapa);
+});
+document.querySelectorAll(".sw").forEach(e => e.style.background = COL[e.dataset.c % COL.length]);
+let sel = null;
+document.querySelectorAll("tr.ruta").forEach(tr => tr.onclick = () => {
+  const i = +tr.dataset.i, mismo = sel === i;
+  document.querySelectorAll("tr.ruta").forEach(t => t.classList.remove("sel"));
+  document.querySelectorAll("tr.det").forEach(t => t.hidden = true);
+  capas.forEach(g => g.eachLayer(l => l.setStyle && l.setStyle({opacity: mismo ? .75 : .12, fillOpacity: mismo ? .9 : .1})));
+  sel = mismo ? null : i;
+  if (sel === null) return;
+  tr.classList.add("sel");
+  document.querySelector(`tr.det[data-i="${i}"]`).hidden = false;
+  capas[i].eachLayer(l => l.setStyle && l.setStyle({opacity: 1, fillOpacity: .9}));
+  const b = L.featureGroup(capas[i].getLayers()).getBounds(); mapa.fitBounds(b.pad(.2));
+});
+</script>
+{% endblock %}

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Moda re- · Reparto{% endblock %}</title>
+<style>
+  :root { --bg:#f6f5f2; --card:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#e3e1db; --acc:#0f766e; --acc-2:#ccfbf1; --warn:#b45309; --err:#b91c1c; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:var(--ink); color:#fff; padding:12px 20px; display:flex; gap:24px; align-items:center; flex-wrap:wrap; }
+  header b { font-size:17px; } header a { color:#d6d3d1; text-decoration:none; } header a.on { color:#fff; border-bottom:2px solid var(--acc-2); }
+  main { max-width:1200px; margin:0 auto; padding:20px 16px 60px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; margin-bottom:16px; }
+  h1 { font-size:22px; margin:0 0 12px; } h2 { font-size:17px; margin:0 0 10px; }
+  label { display:block; font-weight:600; margin:10px 0 4px; }
+  input, select, textarea { font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:6px; width:100%; max-width:420px; background:#fff; }
+  button, .btn { font:inherit; background:var(--acc); color:#fff; border:0; border-radius:6px; padding:9px 16px; cursor:pointer; text-decoration:none; display:inline-block; }
+  button.sec { background:#e7e5e4; color:var(--ink); }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; }
+  .muted { color:var(--muted); } .ok { color:var(--acc); } .warn { color:var(--warn); } .err { color:var(--err); }
+  .flash { padding:10px 14px; border-radius:8px; background:var(--acc-2); margin-bottom:14px; }
+  .flash.error { background:#fee2e2; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
+  .kpi { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; }
+  .kpi .v { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; } .kpi .l { color:var(--muted); font-size:13px; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; } .row > * { flex:1 1 280px; }
+  .scroll { overflow-x:auto; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:99px; background:#eee; font-size:12px; }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+<header>
+  <b>Moda re- · Reparto semanal</b>
+  <a href="{{ url_for('tienda') }}" class="{{ 'on' if request.path.startswith('/tienda') }}">Tiendas</a>
+  <a href="{{ url_for('central') }}" class="{{ 'on' if request.path.startswith('/central') }}">Central</a>
+</header>
+<main>
+  {% for cat, msg in get_flashed_messages(with_categories=true) %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
+  {% block body %}{% endblock %}
+</main>
+</body>
+</html>

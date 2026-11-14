@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Central · semana {{ semana }}</h1>
+<div class="row">
+  <div class="card">
+    <h2>Generar rutas</h2>
+    <form method="post" action="{{ url_for('optimizar') }}">
+      <input type="hidden" name="semana" value="{{ semana }}">
+      <label>Demanda</label>
+      <select name="fuente">
+        <option value="mixto">Pedidos de la app + estimación para quien no ha pedido</option>
+        <option value="pedidos">Solo pedidos de la app</option>
+        <option value="estimacion">Solo estimación por ventas</option>
+      </select>
+      <label>Asignación tienda → planta</label>
+      <select name="asignacion">
+        <option value="optimo">Óptima (respeta capacidad de planta)</option>
+        <option value="actual">La actual (planta_actual)</option>
+      </select>
+      <label>Segundos de búsqueda por planta</label><input type="number" name="segundos" value="30" min="5" max="600">
+      <label>Precio del CO₂ en el objetivo (€/t)</label><input type="number" name="precio_co2" value="0" min="0" step="10">
+      <label><input type="checkbox" name="plantas_futuras" value="1" style="width:auto"> Incluir plantas futuras (Asturias, Santiago)</label>
+      <p>
+      {% if trabajo and trabajo.estado == 'calculando' %}
+        <span class="warn" id="st">Calculando… esta página se recargará sola.</span>
+      {% else %}<button>Optimizar semana</button>{% endif %}
+      </p>
+      {% if trabajo and trabajo.estado == 'error' %}<p class="err">Error: {{ trabajo.msg }}</p>{% endif %}
+    </form>
+  </div>
+  <div class="card">
+    <h2>Último plan</h2>
+    {% if plan %}{% set r = plan.resumen %}
+      <p>{{ r.rutas }} rutas · {{ r.camiones }} camiones · {{ '{:,.0f}'.format(r.km) }} km ·
+         <b>{{ '{:,.0f}'.format(r.coste_eur) }} €</b> · {{ '{:,.0f}'.format(r.co2_kg) }} kg CO₂ ·
+         servicio {{ '%.1f'|format(100 * r.nivel_servicio) }} %</p>
+      <p><a class="btn" href="{{ url_for('plan', semana=semana) }}">Ver rutas y mapa</a></p>
+    {% else %}<p class="muted">Todavía no hay plan para esta semana.</p>{% endif %}
+    <form method="get"><label>Cambiar de semana</label><input name="semana" value="{{ semana }}" pattern="\d{4}-W\d{2}"></form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Pedidos recibidos: {{ n_pedidos }} de {{ filas|length }} tiendas</h2>
+  <div class="scroll"><table>
+    <tr><th>Tienda</th><th>Provincia</th><th>Tamaño</th><th class="n">Pedido (cajas)</th><th class="n">Pedido (kg)</th><th class="n">Estimación (kg)</th><th>Comentario</th></tr>
+    {% for f in filas %}
+    <tr><td>{{ f.nombre }} <span class="muted">{{ f.id }}</span></td><td>{{ f.provincia }}</td><td>{{ f.cat }}</td>
+      <td class="n">{{ f.pedido_cajas or '—' }}</td><td class="n">{{ '%.0f'|format(f.pedido_kg) if f.pedido_kg else '—' }}</td>
+      <td class="n">{{ '%.0f'|format(f.estim_kg) if f.estim_kg else 'no toca' }}</td><td>{{ f.comentario }}</td></tr>
+    {% endfor %}
+  </table></div>
+</div>
+{% if trabajo and trabajo.estado == 'calculando' %}
+<script>
+  setInterval(async () => {
+    const r = await fetch("{{ url_for('estado', semana=semana) }}").then(r => r.json());
+    if (r.estado !== "calculando") location.reload();
+  }, 3000);
+</script>
+{% endif %}
+{% endblock %}

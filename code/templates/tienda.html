@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Pedido de reposición</h1>
+<div class="card">
+  <form method="get">
+    <div class="row">
+      <div><label>Tienda</label>
+        <select name="tienda" onchange="this.form.submit()">
+          <option value="">— elige tu tienda —</option>
+          {% for t in tiendas.itertuples() %}
+          <option value="{{ t.id_tienda }}" {{ 'selected' if t.id_tienda == tid }}>{{ t.provincia }} · {{ t.nombre }}</option>
+          {% endfor %}
+        </select></div>
+      <div><label>Semana de entrega</label>
+        <input name="semana" value="{{ semana }}" pattern="\d{4}-W\d{2}" onchange="this.form.submit()"></div>
+    </div>
+  </form>
+</div>
+
+{% if info %}
+<div class="card">
+  <h2>{{ info.nombre }}</h2>
+  <p class="muted">{{ info.municipio }} · tienda {{ info.categoria }} · recepción {{ info.ventana }}</p>
+  {% if info.isla %}<p class="warn">Esta tienda no tiene acceso por carretera: la central organizará el envío marítimo aparte.</p>{% endif %}
+  <p>Sugerencia según tus ventas: <b>{{ info.estim_cajas }} cajas</b> (≈ {{ '%.0f'|format(info.estim_kg) }} kg).
+     Máximo por entrega: {{ info.max_cajas }} cajas. 1 caja ≈ {{ kg_caja }} kg.</p>
+  {% if pedido %}
+  <p class="ok">Pedido registrado: <b>{{ pedido.cajas }} cajas</b> ({{ '%.0f'|format(pedido.kg) }} kg), actualizado {{ pedido.actualizado }}.</p>
+  {% else %}
+  <p class="muted">Aún no has hecho pedido para esta semana: si no lo haces, la central usará la sugerencia.</p>
+  {% endif %}
+  <form method="post">
+    <input type="hidden" name="tienda" value="{{ tid }}"><input type="hidden" name="semana" value="{{ semana }}">
+    <div class="row">
+      <div><label>Cajas que necesitas</label>
+        <input type="number" name="cajas" min="0" step="1" value="{{ pedido.cajas if pedido else info.estim_cajas }}"></div>
+      <div><label>Kg (opcional, si lo sabes)</label>
+        <input type="number" name="kg" min="0" step="0.1" value="{{ pedido.kg if pedido else '' }}" placeholder="se calcula con las cajas"></div>
+    </div>
+    <label>Comentario para la central</label>
+    <textarea name="comentario" rows="2">{{ pedido.comentario if pedido else '' }}</textarea>
+    <p><button>Guardar pedido</button>
+    {% if pedido %}<button class="sec" name="accion" value="borrar">Eliminar pedido</button>{% endif %}</p>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

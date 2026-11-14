@@ -33,3 +33,8 @@ kg_retorno_por_kg_entregado,0.3,kg/kg,SINTÉTICO,,"Logística inversa: kg de sac
 nivel_servicio_def,% de la necesidad semanal en kg de cada tienda entregada dentro de su ventana de recepción y con la frecuencia objetivo de su segmento; por tienda y media de la red ponderada por kg,texto,SINTÉTICO,Definición única acordada por los mentores; pendiente de que la valide Moda re-,Definición única de nivel de servicio
 nivel_servicio_objetivo,0.95,fracción,SINTÉTICO,,Objetivo de nivel de servicio: % de la necesidad semanal en kg de cada tienda entregada dentro de su ventana de recepción y con la frecuencia objetivo de su segmento; por tienda y media de la red ponderada por kg
 horizonte_planificacion_dias,5,días,SINTÉTICO,"Ficha del reto: periodo de planificación, por ejemplo una semana",Días laborables que se planifican
+tipos_troncal,VEH-R12;VEH-R18;VEH-ART,id_tipo,SINTÉTICO,Petición del equipo (14/11/2026): los camiones grandes no entran en las ciudades,Tipos de vehículo para el escalón troncal planta → almacén (separados por ;)
+entregas_semana_almacen,1,entregas/semana,SINTÉTICO,,Reposiciones semanales de cada almacén desde su planta (si no cabe en un camión se divide en varias)
+tiempo_descarga_almacen_min,45,min,SINTÉTICO,,Tiempo de descarga de un camión troncal en el almacén
+holgura_capacidad_almacen,1.5,,SINTÉTICO,Supuesto del prototipo (almacenes inventados),Solo para generar_almacenes.py: capacidad = holgura × demanda media semanal de las tiendas de la provincia
+capacidad_min_almacen_kg,1500,kg/semana,SINTÉTICO,Supuesto del prototipo (almacenes inventados),Solo para generar_almacenes.py: capacidad mínima de un almacén
