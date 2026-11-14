@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+import re
 from collections import defaultdict
 
 from sqlalchemy import func
@@ -27,6 +28,25 @@ VENTANA_MEDIA_DIAS = 28              # las ventas medias se calculan sobre las �
 MIN_KG_PEDIDO_AUTO = C.KG_POR_CAJA / 2   # por debajo de media caja no se genera pedido automático
 MAX_DIAS_RECUPERAR = 31
 ACTIVOS = ("pendiente", "confirmado", "planificado", "en_reparto")
+MAX_UNIDADES_LINEA = 20000            # tope por prenda en un pedido/venta: evita errores de tecleo (2000 → 20000000)
+RE_SEMANA = re.compile(r"\d{4}-W(0[1-9]|[1-4]\d|5[0-3])")
+
+
+def validar_semana(semana: str) -> str:
+    if not RE_SEMANA.fullmatch(semana or ""):
+        raise ErrorNegocio("Semana no válida: usa el formato AAAA-Www (p. ej. 2026-W48).")
+    try:
+        lunes_de(semana)
+    except ValueError:
+        raise ErrorNegocio(f"La semana {semana} no existe.")
+    return semana
+
+
+def validar_lineas(lineas: dict[str, int]) -> dict[str, int]:
+    for c, u in lineas.items():
+        if abs(u) > MAX_UNIDADES_LINEA:
+            raise ErrorNegocio(f"{c}: {u} prendas parece un error (máximo {MAX_UNIDADES_LINEA:,} por línea).")
+    return lineas
 
 
 class ErrorNegocio(Exception):
@@ -120,9 +140,11 @@ def generar_automaticos(hasta: dt.date | None = None, log=lambda *a: None) -> in
     desde = max(desde, hasta - dt.timedelta(days=MAX_DIAS_RECUPERAR))
     creados = 0
     tiendas = Tienda.query.filter_by(activa=True, pedido_auto_activo=True).all()
+    # si la app ha estado días sin abrirse, lo atrasado se entrega en la primera semana aún abierta, no en una pasada
+    primera = semana_entrega_para(dt.date.today())
     f = desde
     while f <= hasta:
-        semana = semana_entrega_para(f)
+        semana = max(semana_entrega_para(f), primera)
         if not semana_cerrada(semana):
             for t in tiendas:
                 if not toca_pedido(t, f):
@@ -146,9 +168,10 @@ def generar_automaticos(hasta: dt.date | None = None, log=lambda *a: None) -> in
 
 def crear_pedido_adicional(tienda: Tienda, lineas: dict[str, int], semana: str, comentario: str,
                            urgente: bool, usuario) -> Pedido:
-    lineas = {c: u for c, u in lineas.items() if u > 0}
+    lineas = validar_lineas({c: u for c, u in lineas.items() if u > 0})
     if not lineas:
         raise ErrorNegocio("Indica al menos una prenda.")
+    validar_semana(semana)
     if semana_cerrada(semana):
         raise ErrorNegocio(f"La semana {semana} ya está cerrada: elige una semana posterior.")
     if semana < semana_entrega_para(dt.date.today()):
@@ -190,6 +213,7 @@ def _stock_planta(p: Planta, cat: str) -> StockPlanta:
 
 def registrar_ventas(t: Tienda, lineas: dict[str, int], fecha: dt.date, usuario) -> list[str]:
     """Resta del stock lo vendido y guarda la venta. Devuelve avisos (si se vende más de lo que consta)."""
+    validar_lineas(lineas)
     avisos = []
     for cat, u in lineas.items():
         if u <= 0:
@@ -208,6 +232,7 @@ def registrar_ventas(t: Tienda, lineas: dict[str, int], fecha: dt.date, usuario)
 def ajustar_stock_prendas(entidad: Tienda | Planta, lineas: dict[str, int], motivo: str, usuario) -> list[str]:
     """Entradas (+) o salidas (−) manuales de prendas en una tienda o planta (inventario, mermas, donaciones…)."""
     es_tienda = isinstance(entidad, Tienda)
+    validar_lineas(lineas)
     avisos = []
     for cat, d in lineas.items():
         if not d:
@@ -237,11 +262,15 @@ def ajustar_cajas_almacen(a: Almacen, delta: int, motivo: str, usuario) -> list[
 
 # ----------------------------------------------------------------------------- cierre de semana
 def cerrar_semana(semana: str) -> dict:
-    """Confirma los pedidos pendientes de la semana y los vuelca a la tabla que lee el optimizador."""
+    """Confirma los pedidos pendientes de la semana y vuelca a la tabla que lee el optimizador TODOS los de la
+    semana (también los ya planificados: si se vuelve a cerrar tras importar un plan no deben perderse)."""
+    validar_semana(semana)
     generar_automaticos()
-    pedidos = Pedido.query.filter(Pedido.semana_entrega == semana, Pedido.estado.in_(("pendiente", "confirmado"))).all()
+    pedidos = Pedido.query.filter(Pedido.semana_entrega == semana,
+                                  Pedido.estado.in_(("pendiente", "confirmado", "planificado"))).all()
     for p in pedidos:
-        p.estado = "confirmado"
+        if p.estado == "pendiente":
+            p.estado = "confirmado"
     por_tienda = defaultdict(lambda: {"kg": 0.0, "n": 0, "coment": []})
     for p in pedidos:
         x = por_tienda[p.tienda_id]
@@ -334,9 +363,9 @@ def expedir_pedido(p: Pedido, usuario):
     """El almacén carga el pedido en el camión de reparto: resta sus cajas."""
     if p.estado not in ("planificado", "confirmado"):
         raise ErrorNegocio("El pedido no está listo para salir (debe estar confirmado o planificado).")
-    a = p.almacen or p.tienda.almacen
+    a = p.almacen
     if a is None:
-        raise ErrorNegocio("El pedido no tiene almacén asignado.")
+        raise ErrorNegocio("El pedido aún no tiene almacén: se asigna al optimizar las rutas de la semana.")
     if a.stock_cajas < p.cajas:
         raise ErrorNegocio(f"El almacén solo tiene {a.stock_cajas} cajas y el pedido necesita {p.cajas}.")
     a.stock_cajas -= p.cajas
@@ -377,6 +406,9 @@ def alertas(rol: str = "admin", entidad_id: str | None = None) -> list[tuple[str
                 out.append(("err", f"{a.nombre}: {a.stock_cajas} cajas, supera el máximo de {a.stock_max_cajas}."))
             elif a.ocupacion >= 0.9:
                 out.append(("warn", f"{a.nombre}: al {a.ocupacion:.0%} de su capacidad ({a.stock_cajas}/{a.stock_max_cajas} cajas)."))
+            if a.sin_planta:
+                out.append(("err", f"{a.nombre}: ha vetado todas las plantas activas; no recibirá mercancía y "
+                                   f"el optimizador servirá sus tiendas desde otros almacenes."))
             pend = sum(r.cajas for r in Reposicion.query.filter_by(almacen_id=a.id).filter(
                 Reposicion.estado != "recibida"))
             if pend and a.stock_cajas + pend > a.stock_max_cajas:
@@ -398,6 +430,14 @@ def alertas(rol: str = "admin", entidad_id: str | None = None) -> list[tuple[str
             falta = [c for c, u in pend.items() if u > stock.get(c, 0)]
             if falta:
                 out.append(("err", f"{p.nombre}: no hay stock suficiente para las reposiciones planificadas ({', '.join(falta)})."))
+    if rol in ("admin", "tienda"):
+        utiles = {a.id for a in Almacen.query.filter_by(activo=True) if not a.sin_planta}
+        q = Tienda.query.filter_by(activa=True)
+        if rol == "tienda":
+            q = q.filter_by(id=entidad_id)
+        for t in q:
+            if t.almacenes_vetados and utiles <= {a.id for a in t.almacenes_vetados}:
+                out.append(("err", f"{t.nombre}: ha vetado todos los almacenes disponibles; sus pedidos no se podrán repartir."))
     if rol == "tienda":
         t = db.session.get(Tienda, entidad_id)
         agotadas = [s.categoria.nombre for s in t.stock if s.unidades == 0]

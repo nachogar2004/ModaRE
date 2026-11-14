@@ -20,7 +20,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 from . import config as C
 from . import pedidos as PED
-from .asignacion import asignar, plantas_activas
+from .asignacion import asignar, plantas_activas, tiendas_sin_almacen
 from .datos import cargar_datos, construir_visitas, construir_visitas_troncal, demanda_estimada
 from .osrm import añadir_geometrias
 from .simulacion import flota_necesaria, simular_ruta
@@ -110,6 +110,12 @@ def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: 
 
     visitas, avisos = construir_visitas(d, demanda)
     plantas = plantas_activas(d, plantas_futuras)
+    vetadas = tiendas_sin_almacen(d, {v.tienda for v in visitas}, plantas)
+    for tid in sorted(vetadas):
+        avisos.append({"tienda": tid, "nombre": d.nombre_lugar(tid)[0],
+                       "kg": round(sum(v.kg for v in visitas if v.tienda == tid), 1),
+                       "motivo": "Ha vetado todos los almacenes que pueden recibir mercancía: no se puede servir"})
+    visitas = [v for v in visitas if v.tienda not in vetadas]
     uso = asignar(d, visitas, plantas, asignacion)
     troncal = construir_visitas_troncal(d, visitas, uso["almacen_planta"])
     log(f"[{semana}] {len(demanda)} tiendas con demanda, {len(visitas)} entregas a tienda desde "

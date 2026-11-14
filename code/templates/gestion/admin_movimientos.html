@@ -1,14 +1,27 @@
 {% extends "base.html" %}
+{% from "gestion/_m.html" import icono, cabecera, vacio with context %}
+{% block title %}Movimientos · ReMode Studio{% endblock %}
 {% block body %}
-<h1>Movimientos de stock</h1>
-<p class="muted">Últimos 500 cambios de stock en tiendas y plantas (prendas) y almacenes (cajas).</p>
-<form method="get" class="tools"><input name="entidad_id" value="{{ ent }}" placeholder="TD-001, PL-MAD, AL-MADRID…"><button class="sec">Filtrar</button></form>
-<div class="card scroll"><table>
-  <tr><th>Fecha</th><th>Dónde</th><th>Categoría</th><th class="n">Cambio</th><th>Motivo</th><th>Referencia</th><th>Usuario</th></tr>
-  {% for m in filas %}
-  <tr><td>{{ m.fecha.strftime('%d/%m/%Y %H:%M') }}</td><td>{{ ROLES[m.entidad] }} {{ m.entidad_id }}</td>
-    <td>{{ m.categoria_id or 'cajas' }}</td><td class="n {{ 'ok' if m.delta > 0 else 'err' }}">{{ '%+d'|format(m.delta) }}</td>
-    <td>{{ m.motivo }}</td><td>{{ m.referencia or '' }}</td><td>{{ m.usuario.username if m.usuario else '—' }}</td></tr>
-  {% else %}<tr><td colspan="7" class="muted">Sin movimientos.</td></tr>{% endfor %}
-</table></div>
+{{ cabecera('Movimientos de stock', 'Últimos 500 cambios: prendas en tiendas y plantas, cajas en almacenes', eyebrow='Auditoría') }}
+
+<div class="card flush">
+  <div class="card-head">
+    <form method="get" class="tools" style="margin:0">
+      <input name="entidad_id" value="{{ ent }}" placeholder="TD-001, PL-MAD, AL-MADRID…" aria-label="Filtrar por tienda, planta o almacén" style="max-width:260px">
+      <button class="sec">{{ icono('search') }}Filtrar</button>
+      {% if ent %}<a class="btn ghost" href="{{ url_for('admin.movimientos') }}">Quitar filtro</a>{% endif %}
+    </form>
+    <div class="search">{{ icono('search') }}<input type="search" placeholder="Buscar motivo, usuario…" data-filter="#t-mov" aria-label="Buscar"></div>
+  </div>
+  <div class="table-wrap mt"><table id="t-mov">
+    <thead><tr><th>Fecha</th><th>Dónde</th><th>Categoría</th><th class="n">Cambio</th><th>Motivo</th><th>Referencia</th><th>Usuario</th></tr></thead>
+    <tbody>
+    {% for m in filas %}
+    <tr><td class="nowrap">{{ m.fecha.strftime('%d/%m/%Y %H:%M') }}</td><td class="nowrap">{{ ROLES[m.entidad] }} <b>{{ m.entidad_id }}</b></td>
+      <td>{{ m.categoria_id or 'cajas' }}</td><td class="n {{ 'ok' if m.delta > 0 else 'err' }}"><b>{{ '%+d'|format(m.delta) }}</b></td>
+      <td><span class="pill plain">{{ m.motivo|replace('_', ' ') }}</span></td><td>{{ m.referencia or '' }}</td><td>{{ m.usuario.username if m.usuario else '—' }}</td></tr>
+    {% else %}{{ vacio('Sin movimientos todavía.', 'activity', 7) }}{% endfor %}
+    </tbody>
+  </table></div>
+</div>
 {% endblock %}

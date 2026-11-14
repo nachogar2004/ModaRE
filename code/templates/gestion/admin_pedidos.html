@@ -1,25 +1,37 @@
 {% extends "base.html" %}
-{% from "gestion/_m.html" import estado, lineas with context %}
+{% from "gestion/_m.html" import icono, cabecera, vacio, estado, tipo_pedido, lineas with context %}
+{% block title %}Pedidos · ReMode Studio{% endblock %}
 {% block body %}
-<h1>Pedidos <span class="muted" style="font-size:15px">({{ filas|length }}{{ '+' if filas|length == 500 }})</span></h1>
-<form method="get" class="tools">
-  <select name="semana"><option value="">Todas las semanas</option>{% for s in semanas %}<option {{ 'selected' if s == f.semana }}>{{ s }}</option>{% endfor %}</select>
-  <select name="estado"><option value="">Todos los estados</option>{% for k, v in ESTADOS_PEDIDO.items() %}<option value="{{ k }}" {{ 'selected' if k == f.estado }}>{{ v }}</option>{% endfor %}</select>
-  <select name="tipo"><option value="">Automáticos y adicionales</option>
-    <option value="automatico" {{ 'selected' if f.tipo == 'automatico' }}>Automáticos</option>
-    <option value="adicional" {{ 'selected' if f.tipo == 'adicional' }}>Adicionales</option></select>
-  <input name="tienda" value="{{ f.tienda }}" placeholder="Tienda (TD-0…)">
-  <button class="sec">Filtrar</button>
+{{ cabecera('Pedidos', 'Automáticos y adicionales de todas las tiendas' ~ (' · se muestran los 500 más recientes' if filas|length == 500 else ''), eyebrow='Operación') }}
+
+<form method="get" class="card tools" style="padding:14px 16px">
+  <select name="semana" data-autosubmit aria-label="Semana"><option value="">Todas las semanas</option>{% for s in semanas %}<option {{ 'selected' if s == f.semana }}>{{ s }}</option>{% endfor %}</select>
+  <select name="estado" data-autosubmit aria-label="Estado"><option value="">Todos los estados</option>{% for k, v in ESTADOS_PEDIDO.items() %}<option value="{{ k }}" {{ 'selected' if k == f.estado }}>{{ v }}</option>{% endfor %}</select>
+  <select name="tipo" data-autosubmit aria-label="Tipo"><option value="">Automáticos y adicionales</option>
+    <option value="automatico" {{ 'selected' if f.tipo == 'automatico' }}>Solo automáticos</option>
+    <option value="adicional" {{ 'selected' if f.tipo == 'adicional' }}>Solo adicionales</option></select>
+  <input name="tienda" value="{{ f.tienda }}" placeholder="Código de tienda (TD-0…)" style="max-width:220px">
+  <button class="sec">{{ icono('search') }}Filtrar</button>
+  {% if f.values()|select|list %}<a class="btn ghost" href="{{ url_for('admin.pedidos') }}">Quitar filtros</a>{% endif %}
 </form>
-<div class="card scroll"><table>
-  <tr><th>Pedido</th><th>Tienda</th><th>Tipo</th><th>Semana</th><th>Estado</th><th class="n">Prendas</th><th class="n">kg</th><th class="n">Cajas</th><th>Almacén</th><th>Ruta</th><th>Contenido</th></tr>
-  {% for p in filas %}
-  <tr><td>{{ p.codigo }}{% if p.urgente %} <span class="pill cancelado">urgente</span>{% endif %}<div class="ayuda">{{ p.creado.strftime('%d/%m %H:%M') }}</div></td>
-    <td><a href="{{ url_for('tienda.panel', tid=p.tienda_id) }}">{{ p.tienda_id }}</a><div class="ayuda">{{ p.tienda.nombre }}</div></td>
-    <td>{{ estado(p.tipo, {'automatico': 'Automático', 'adicional': 'Adicional'}) }}</td><td>{{ p.semana_entrega }}</td><td>{{ estado(p.estado) }}</td>
-    <td class="n">{{ p.unidades|miles }}</td><td class="n">{{ p.kg|miles(1) }}</td><td class="n">{{ p.cajas }}</td>
-    <td>{{ p.almacen_id or p.tienda.almacen_id or '—' }}</td><td>{{ p.viaje.nombre if p.viaje else '—' }}</td>
-    <td class="ayuda" style="max-width:300px">{{ lineas(p) }}{% if p.comentario %}<br><i>{{ p.comentario }}</i>{% endif %}</td></tr>
-  {% else %}<tr><td colspan="11" class="muted">Sin pedidos con esos filtros.</td></tr>{% endfor %}
-</table></div>
+
+<div class="card flush">
+  <div class="card-head">
+    <div class="search">{{ icono('search') }}<input type="search" placeholder="Buscar en el resultado…" data-filter="#t-ped" data-count="#n-ped" aria-label="Buscar"></div>
+    <span class="small"><b id="n-ped">{{ filas|length }}</b> pedidos · {{ filas|sum(attribute='cajas')|miles }} cajas</span>
+  </div>
+  <div class="table-wrap mt"><table id="t-ped">
+    <thead><tr><th>Pedido</th><th>Tienda</th><th>Tipo</th><th>Semana</th><th>Estado</th><th class="n">Prendas</th><th class="n">Cajas</th><th>Almacén · ruta</th><th>Contenido</th></tr></thead>
+    <tbody>
+    {% for p in filas %}
+    <tr><td class="nowrap"><b>{{ p.codigo }}</b>{% if p.urgente %} <span class="pill urgente plain">urgente</span>{% endif %}<span class="sub">{{ p.creado.strftime('%d/%m %H:%M') }}</span></td>
+      <td><a href="{{ url_for('tienda.panel', tid=p.tienda_id) }}">{{ p.tienda.nombre }}</a><span class="sub">{{ p.tienda_id }} · {{ p.tienda.provincia }}</span></td>
+      <td>{{ tipo_pedido(p.tipo) }}</td><td class="nowrap">{{ p.semana_entrega }}</td><td>{{ estado(p.estado) }}</td>
+      <td class="n">{{ p.unidades|miles }}<span class="sub">{{ p.kg|miles(1) }} kg</span></td><td class="n">{{ p.cajas }}</td>
+      <td class="nowrap">{{ p.almacen_id or '—' }}<span class="sub">{{ p.viaje.nombre if p.viaje else 'sin ruta' }}</span></td>
+      <td class="small" style="max-width:300px">{{ lineas(p) }}{% if p.comentario %}<br><i>{{ p.comentario }}</i>{% endif %}</td></tr>
+    {% else %}{{ vacio('No hay pedidos con estos filtros.', 'box', 9) }}{% endfor %}
+    </tbody>
+  </table></div>
+</div>
 {% endblock %}

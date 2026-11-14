@@ -1,4 +1,4 @@
-"""App de gestión del transporte de Moda re- (tiendas, plantas, almacenes, camiones y administrador).
+"""ReMode Studio: app de gestión del transporte de Moda re- (tiendas, plantas, almacenes, camiones y administrador).
 
 Se monta sobre la app Flask de code/app.py con `init_app(app)`.
 """
@@ -70,13 +70,16 @@ def _csrf_token():
 
 def _comprobar_csrf():
     if request.method == "POST" and request.endpoint != "auth.entrar":
-        if request.form.get("_csrf") != session.get("_csrf"):
+        token = session.get("_csrf")
+        if not token or request.form.get("_csrf") != token:
             abort(400, "Formulario caducado: recarga la página e inténtalo de nuevo.")
 
 
 # ----------------------------------------------------------------------------- montaje
 def init_app(app):
     app.config.setdefault("SQLALCHEMY_DATABASE_URI", os.environ.get("MODARE_DB", f"sqlite:///{DB_PATH}"))
+    app.config.setdefault("SESSION_COOKIE_SAMESITE", "Lax")      # el navegador no manda la sesión desde otras webs
+    app.config.setdefault("SESSION_COOKIE_HTTPONLY", True)
     db.init_app(app)
     login.init_app(app)
 
@@ -96,6 +99,20 @@ def init_app(app):
             from .logistica import generar_automaticos
             app.config["_auto_hoy"] = hoy
             generar_automaticos()
+
+    @app.errorhandler(400)
+    @app.errorhandler(403)
+    @app.errorhandler(404)
+    @app.errorhandler(500)
+    def _error(e):
+        from flask import render_template
+        from werkzeug.exceptions import HTTPException
+        codigo = e.code if isinstance(e, HTTPException) else 500
+        textos = {400: "Petición no válida", 403: "No tienes permiso para ver esta página",
+                  404: "No encontrado", 500: "Error interno"}
+        detalle = e.description if isinstance(e, HTTPException) and codigo == 400 else ""
+        return render_template("gestion/error.html", codigo=codigo, titulo=textos.get(codigo, "Error"),
+                               detalle=detalle), codigo
 
     @app.context_processor
     def _globales():
