@@ -117,6 +117,11 @@ code/
 ### Salidas (`code/salidas/<semana>/`, se sobrescriben en cada ejecución de esa semana)
 - `mapa.html`: grafo sobre el mapa con el **trazado real por carretera** (troncal = línea gruesa del color de la planta, reparto = línea fina),
   lista de rutas filtrable por escalón y planta, y cronograma semanal. Se abre con doble clic (fondo Esri, sin API key).
+  Pestañas de analítica (calculadas en el navegador desde el plan): **Coste por tienda** (troncal + reparto imputados,
+  €/kg, CSV), **Rutas** (coste y desglose km/horas/fijo/pernoctas), **Almacenes** (€/kg troncal y reparto) y **Resumen**
+  (por componente, vehículo, operador, planta y flota). Imputación: el coste de cada ruta se reparte entre sus paradas
+  por kg (o por kg × distancia en línea recta al depósito, seleccionable); cada almacén tiene un €/kg troncal
+  (coste troncal recibido ÷ kg recibidos) que pagan sus tiendas por sus kg. Es una convención, no una factura.
 - `rutas.csv`: una fila por ruta. Nombres `T-MAD-01` (troncal desde la planta de Madrid), `R-SEVILLA-02`
   (reparto desde el almacén de Sevilla); el id interno del solver va en `id_solver`.
 - `paradas.csv`: una fila por parada. `almacenes.csv`: uso de cada almacén. `plan.json`: todo lo anterior + KPIs.
