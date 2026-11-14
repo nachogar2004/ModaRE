@@ -37,7 +37,9 @@ def _init_trabajador():
 def _resolver_y_simular(args):
     escalon, dep, visitas, segundos, precio_co2, estrategia, excluir, tipos = args
     d = _D if _D is not None else cargar_datos()
-    res = resolver_planta(d, dep, visitas, segundos, precio_co2, estrategia, excluir, tipos)
+    # reparto desde un almacén provincial: el conductor vuelve a dormir a casa (rutas de 1 día por defecto)
+    dias_max = int(d.P.get("dias_max_ruta_reparto", d.P["dias_max_ruta"])) if escalon == "reparto" else None
+    res = resolver_planta(d, dep, visitas, segundos, precio_co2, estrategia, excluir, tipos, dias_max)
     res["rutas"] = [simular_ruta(d, dep, r) for r in res["rutas"]]
     res["escalon"] = escalon
     return res

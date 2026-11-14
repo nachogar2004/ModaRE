@@ -99,11 +99,12 @@ PORTAFOLIO = [
 def resolver_planta(d: Datos, planta: str, visitas: list[Visita], segundos: int = 30,
                     precio_co2_eur_t: float = C.PRECIO_CO2_EUR_T,
                     estrategia: str = "LOCAL_CHEAPEST_INSERTION", excluir: frozenset = frozenset(),
-                    tipos: set[str] | None = None) -> dict:
+                    tipos: set[str] | None = None, dias_max: int | None = None) -> dict:
     """planta = id del depósito (planta en el troncal, almacén en el reparto)."""
     P = d.P
     H = int(P["horizonte_planificacion_dias"])
-    dias_max = int(P["dias_max_ruta"]) if P.get("permitir_rutas_multidia", 0) else 1
+    if dias_max is None:
+        dias_max = int(P["dias_max_ruta"]) if P.get("permitir_rutas_multidia", 0) else 1
     carga = int(P["tiempo_carga_planta_min"])
     p_ini, p_fin = d.horario_deposito(planta)
 
@@ -198,6 +199,20 @@ def resolver_planta(d: Datos, planta: str, visitas: list[Visita], segundos: int 
         permitidos = [vi for vi, veh in enumerate(pool) if veh.rango <= rango_max[v.vehiculo_max]]
         rt.VehicleVar(idx).SetValues([-1] + permitidos)
         rt.AddDisjunction([idx], penal + 100 * int(v.kg))
+
+    # --- las entregas de una misma tienda van en rutas distintas ---------------------------------
+    # (si no, el solver junta la entrega de L-M y la de X-V en una ruta y el conductor duerme
+    #  junto a la tienda para descargar la segunda mitad al día siguiente)
+    slv = rt.solver()
+    por_tienda: dict[str, list[int]] = {}
+    for k, v in enumerate(visitas, start=1):
+        por_tienda.setdefault(v.tienda, []).append(man.NodeToIndex(k))
+    for idxs in por_tienda.values():
+        for i, a in enumerate(idxs):
+            for b in idxs[i + 1:]:
+                va, vb = rt.VehicleVar(a), rt.VehicleVar(b)
+                # distinto vehículo, o al menos una de las dos sin servir (vehículo = -1)
+                slv.Add(slv.IsDifferentVar(va, vb) + slv.IsEqualCstVar(va, -1) >= 1)
 
     for vi in range(len(pool)):
         rt.AddVariableMinimizedByFinalizer(tiempo.CumulVar(rt.Start(vi)))

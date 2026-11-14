@@ -38,3 +38,4 @@ entregas_semana_almacen,1,entregas/semana,SINTÉTICO,,Reposiciones semanales de 
 tiempo_descarga_almacen_min,45,min,SINTÉTICO,,Tiempo de descarga de un camión troncal en el almacén
 holgura_capacidad_almacen,1.5,,SINTÉTICO,Supuesto del prototipo (almacenes inventados),Solo para generar_almacenes.py: capacidad = holgura × demanda media semanal de las tiendas de la provincia
 capacidad_min_almacen_kg,1500,kg/semana,SINTÉTICO,Supuesto del prototipo (almacenes inventados),Solo para generar_almacenes.py: capacidad mínima de un almacén
+dias_max_ruta_reparto,1,días,SINTÉTICO,Revisión del cronograma (14/11/2026): rutas de reparto urbanas que dormían a pocos km del almacén,Días máximos de una ruta de reparto almacén → tiendas (1 = el conductor vuelve cada día). dias_max_ruta sigue aplicando al troncal

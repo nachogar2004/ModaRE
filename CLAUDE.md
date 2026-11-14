@@ -80,7 +80,10 @@ El mismo modelo se resuelve en los dos escalones:
   - salida del depósito en su horario de carga + 45 min de carga
   - **pausa 20 min / 200 km** (prorrateada en el tiempo de cada tramo)
   - **descanso nocturno obligatorio** de 11 h (break interval entre 19:00 y 22:00 cada noche): nadie conduce de noche
-  - jornada ≤ 13 h y conducción ≤ 9 h por día × `dias_max_ruta` (3); rutas multidía con pernocta
+  - jornada ≤ 13 h y conducción ≤ 9 h por día × días de ruta: troncal hasta `dias_max_ruta` (3, con pernocta);
+    **reparto de 1 día** (`dias_max_ruta_reparto`): el conductor vuelve cada día al almacén
+  - **las entregas de una misma tienda van en rutas distintas** (si no, el solver juntaba la de L-M y la de X-V
+    en una ruta y el conductor dormía junto a la tienda)
   - cada visita se sirve o se paga una penalización de 100.000 € → si no cabe, se reporta, no rompe
 - **Portafolio**: la búsqueda local se atasca según la solución inicial (si arranca con furgonetas no
   consolida en camiones). Cada depósito se resuelve con varias configuraciones (estrategia inicial × flota con/sin
@@ -116,7 +119,8 @@ code/
 
 ### Salidas (`code/salidas/<semana>/`, se sobrescriben en cada ejecución de esa semana)
 - `mapa.html`: grafo sobre el mapa con el **trazado real por carretera** (troncal = línea gruesa del color de la planta, reparto = línea fina),
-  lista de rutas filtrable por escalón y planta, y cronograma semanal. Se abre con doble clic (fondo Esri, sin API key).
+  lista de rutas filtrable por escalón y planta, y cronograma semanal (tramos de trabajo, descansos nocturnos rayados
+  y una marca por entrega; los descansos salen de la simulación, campo `descansos` de cada ruta). Se abre con doble clic (fondo Esri, sin API key).
 - `rutas.csv`: una fila por ruta. Nombres `T-MAD-01` (troncal desde la planta de Madrid), `R-SEVILLA-02`
   (reparto desde el almacén de Sevilla); el id interno del solver va en `id_solver`.
 - `paradas.csv`: una fila por parada. `almacenes.csv`: uso de cada almacén. `plan.json`: todo lo anterior + KPIs.
@@ -141,7 +145,8 @@ Dos escalones (modelo actual):
 
 | Escenario | Rutas (troncal + reparto) | Camiones | km | Coste (troncal + reparto) | CO₂ | Servicio |
 |---|---|---|---|---|---|---|
-| Asignación óptima, almacenes en **polígonos**, distancias por carretera | 69 (10 + 59) | 52 | 12.401 | 16.037 € (7.702 + 8.335) | 5,7 t | 100 % |
+| **Actual**: polígonos, carretera, reparto de 1 día y entregas de una tienda en rutas distintas | 67 (10 + 57) | 52 | 12.616 | 15.648 € (7.702 + 7.946) | 6,0 t | 100 % |
+| Almacenes en polígonos, sin esas dos restricciones | 69 (10 + 59) | 52 | 12.401 | 16.037 € (7.702 + 8.335) | 5,7 t | 100 % |
 | Ídem con almacenes en el centroide de la provincia | 64 (10 + 54) | 52 | 11.372 | 16.425 € (8.221 + 8.204) | 5,5 t | 100 % |
 | Ídem con distancias en línea recta ×1,26 (antes de OSRM) | 69 (10 + 59) | 50 | 11.406 | 14.577 € (7.453 + 7.124) | 5,4 t | 100 % |
 | Asignación actual, semana W48, línea recta ×1,26 | 70 (11 + 59) | 51 | 12.100 | 15.780 € (8.720 + 7.060) | 6,0 t | 100 % (troncal 97 %) |

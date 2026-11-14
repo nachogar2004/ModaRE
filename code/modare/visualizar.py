@@ -55,16 +55,24 @@ PLANTILLA = r"""<!doctype html>
   .bar i { display:block; height:100%; background:var(--accent); }
   #gantt { height:260px; overflow:auto; background:var(--panel); border-top:1px solid var(--line); padding:6px 10px 10px; }
   #gantt h2 { font-size:13px; margin:2px 0 6px; color:var(--muted); font-weight:600; }
-  .g-row { display:grid; grid-template-columns:120px 1fr; align-items:center; height:18px; cursor:pointer; }
+  .g-row { display:grid; grid-template-columns:120px 1fr; align-items:stretch; height:18px; cursor:pointer; }
+  .g-row:hover .g-track { background:rgba(0,0,0,.03); }
   .g-row:hover .g-lbl { text-decoration:underline; }
-  .g-lbl { font-size:11px; font-variant-numeric:tabular-nums; }
-  .g-track { position:relative; height:12px; }
-  .g-bar { position:absolute; top:1px; height:10px; border-radius:3px; opacity:.85; }
-  .g-row.dim .g-bar { opacity:.15; }
+  .g-lbl { font-size:11px; font-variant-numeric:tabular-nums; align-self:center; }
+  .g-track { position:relative; height:18px; }
+  .g-seg { position:absolute; top:4px; height:10px; }
+  .g-seg.trabajo { opacity:.9; }
+  .g-seg.descanso { opacity:.9; background-image:repeating-linear-gradient(135deg, rgba(255,255,255,.75) 0 3px, transparent 3px 6px) !important; }
+  .g-seg.ini { border-radius:3px 0 0 3px; } .g-seg.fin { border-radius:0 3px 3px 0; } .g-seg.ini.fin { border-radius:3px; }
+  .g-tick { position:absolute; top:3px; height:12px; width:2px; background:#fff; box-shadow:0 0 0 1px rgba(0,0,0,.25); }
+  .g-row.dim .g-seg, .g-row.dim .g-tick { opacity:.15; }
+  .g-mid { position:absolute; top:0; bottom:0; border-left:1px solid var(--line); pointer-events:none; }
+  .g-ley { font-weight:400; margin-left:10px; }
+  .g-ley i { display:inline-block; width:18px; height:9px; vertical-align:middle; margin:0 3px 0 8px; border-radius:2px; background:#64748b; }
   .g-axis { display:grid; grid-template-columns:120px 1fr; position:sticky; top:0; background:var(--panel); z-index:1; }
   .g-days { position:relative; height:16px; font-size:11px; color:var(--muted); }
   .g-days span { position:absolute; border-left:1px solid var(--line); padding-left:3px; height:100%; }
-  .g-night { position:absolute; top:0; bottom:0; background:rgba(30,40,80,.06); pointer-events:none; }
+  .g-night { position:absolute; top:0; bottom:0; background:rgba(30,40,80,.07); pointer-events:none; }
   .num { background:#fff; border:2px solid; border-radius:50%; width:22px; height:22px; line-height:18px; text-align:center; font-size:11px; font-weight:700; }
   .almacen-ico { width:12px; height:12px; background:#fff; border:3px solid #111; transform:rotate(45deg); }
   .planta-ico { background:#111; color:#fff; border-radius:4px; padding:2px 5px; font-size:11px; font-weight:700; white-space:nowrap; }
@@ -241,19 +249,40 @@ function pintarGantt() {
   const finMin = Math.max(5 * 1440, ...visibles.map(r => r.t_vuelta));
   const dias = Math.ceil(finMin / 1440), total = dias * 1440;
   const pct = m => (100 * m / total) + "%";
-  let h = `<h2>Cronograma semanal (barra = vehículo fuera de su planta/almacén, zonas sombreadas = noche)</h2>`;
+  let h = `<h2>Cronograma semanal <span class="g-ley">` +
+    `<i></i>trabajando (carga, conducción, descargas)` +
+    `<i class="g-seg descanso" style="position:static;background-color:#64748b"></i>descanso nocturno fuera` +
+    `<i style="width:2px;background:#fff;box-shadow:0 0 0 1px rgba(0,0,0,.4)"></i>entrega` +
+    `<i style="background:rgba(30,40,80,.12)"></i>noche (19–06 h)</span></h2>`;
   let eje = "", noches = `<div class="g-night" style="left:0;width:${pct(360)}"></div>`;
   for (let d = 0; d < dias; d++) {
     eje += `<span style="left:${pct(d * 1440)}">${DIAS[d % 7]}</span>`;
+    if (d > 0) noches += `<div class="g-mid" style="left:${pct(d * 1440)}"></div>`;
     const ini = d * 1440 + 1140;  // 19:00 -> 06:00
     noches += `<div class="g-night" style="left:${pct(ini)};width:${pct(Math.min(660, total - ini))}"></div>`;
   }
   h += `<div class="g-axis"><div></div><div class="g-days">${eje}</div></div>`;
   for (const r of visibles) {
     const dim = seleccion && seleccion !== r.nombre ? "dim" : "";
-    h += `<div class="g-row ${dim}" data-r="${esc(r.nombre)}" title="${esc(r.nombre)} · ${r.salida} → ${r.vuelta}">
+    // tramos de trabajo y de descanso entre la salida y la vuelta
+    const segs = [];
+    let t = r.t_salida;
+    for (const [a, b] of r.descansos || []) {
+      if (a > t) segs.push([t, a, "trabajo"]);
+      segs.push([Math.max(a, t), b, "descanso"]);
+      t = Math.max(t, b);
+    }
+    if (r.t_vuelta > t) segs.push([t, r.t_vuelta, "trabajo"]);
+    const barra = segs.map(([a, b, k], i) =>
+      `<div class="g-seg ${k}${i === 0 ? " ini" : ""}${i === segs.length - 1 ? " fin" : ""}" ` +
+      `style="left:${pct(a)};width:${pct(Math.max(15, b - a))};background-color:${r.color}"></div>`).join("") +
+      r.paradas.map(p => p.t_abs != null ? `<div class="g-tick" style="left:${pct(p.t_abs)}"></div>` : "").join("");
+    const titulo = `${r.nombre} · sale ${r.salida} → vuelve ${r.vuelta}` +
+      (r.noches ? ` · ${r.noches} noche${r.noches > 1 ? "s" : ""} fuera` : "") +
+      "\n" + r.paradas.map((p, k) => `${k + 1}. ${p.inicio_descarga} ${p.nombre}`).join("\n");
+    h += `<div class="g-row ${dim}" data-r="${esc(r.nombre)}" title="${esc(titulo)}">
       <div class="g-lbl">${esc(r.nombre)}</div>
-      <div class="g-track">${noches}<div class="g-bar" style="left:${pct(r.t_salida)};width:${pct(Math.max(20, r.t_vuelta - r.t_salida))};background:${r.color}"></div></div></div>`;
+      <div class="g-track">${noches}${barra}</div></div>`;
   }
   const g = document.getElementById("gantt"); g.innerHTML = h;
   g.querySelectorAll(".g-row").forEach(el => el.onclick = () => seleccionar(el.dataset.r));

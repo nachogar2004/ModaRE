@@ -27,6 +27,7 @@ class Conductor:
         self.pausas = 0
         self.min_trabajo = 0.0   # tiempo facturable (sin descansos nocturnos)
         self.log = []
+        self.descansos = []      # [(inicio, fin)] en minutos de la semana (para el cronograma)
 
     @property
     def jornada(self):
@@ -34,6 +35,7 @@ class Conductor:
 
     def _descanso(self):
         self.log.append((self.t, "descanso nocturno"))
+        self.descansos.append((self.t, self.t + C.DESCANSO_NOCTURNO_MIN))
         self.t += C.DESCANSO_NOCTURNO_MIN
         self.inicio_dia, self.cond_hoy, self.km_sin_pausa = self.t, 0.0, 0.0
         self.noches += 1
@@ -79,6 +81,7 @@ class Conductor:
         if espera >= C.DESCANSO_NOCTURNO_MIN or self.jornada + espera > max_jor:
             # la espera se convierte en descanso nocturno: empieza un día nuevo al abrir la tienda
             self.log.append((self.t, "descanso nocturno"))
+            self.descansos.append((self.t, t_obj))
             self.t = t_obj
             self.inicio_dia, self.cond_hoy, self.km_sin_pausa = self.t, 0.0, 0.0
             self.noches += 1
@@ -172,6 +175,7 @@ def simular_ruta(d: Datos, planta: str, ruta: dict) -> dict:
                            "fijo": round(coste_fijo, 2), "pernoctas": round(coste_pern, 2)},
         "coste_combustible_eur_info": round(litros * C.PRECIO_GASOLEO_EUR_L, 2),
         "kg_a_tiempo": ok_kg, "kg_tarde": tarde_kg, "avisos": avisos,
+        "descansos": [[round(a), round(b)] for a, b in cond.descansos],
     }
 
 
