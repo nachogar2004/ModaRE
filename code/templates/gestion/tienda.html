@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% from "gestion/_m.html" import csrf, estado, barra, alertas as alertas_m, rejilla, lineas with context %}
+{% block title %}{{ t.nombre }} · Moda re-{% endblock %}
+{% block body %}
+<h1>{{ t.nombre }}</h1>
+<p class="muted">{{ t.id }} · {{ t.direccion or '' }}, {{ t.municipio }} ({{ t.provincia }}) · tienda {{ t.categoria_tamano }}
+  · almacén {{ t.almacen.nombre if t.almacen else '—' }} · recibe {{ t.dias_recepcion }} {{ t.ventana_inicio }}–{{ t.ventana_fin }}
+  {% if not t.activa %}<span class="pill cancelado">de baja</span>{% endif %}</p>
+{% if not t.acceso_carretera %}<div class="alerta">Tienda sin acceso por carretera: la central organiza el envío marítimo aparte.</div>{% endif %}
+{{ alertas_m(alertas) }}
+
+<div class="kpis" style="margin-bottom:16px">
+  <div class="kpi"><div class="v">{{ t.stock_prendas|miles }}</div><div class="l">prendas en stock
+    {% if t.capacidad_max_prendas %} de {{ t.capacidad_max_prendas|miles }}{{ barra(t.stock_prendas / t.capacidad_max_prendas) }}{% endif %}</div></div>
+  <div class="kpi"><div class="v">{{ ventas_7d.values()|sum|miles }}</div><div class="l">vendidas últimos 7 días</div></div>
+  <div class="kpi"><div class="v">{{ en_camino.values()|sum|miles }}</div><div class="l">prendas pedidas en camino</div></div>
+  <div class="kpi"><div class="v">{{ proxima_auto.strftime('%d/%m') if proxima_auto else '—' }}</div>
+    <div class="l">próximo pedido automático ({{ FRECUENCIAS[t.frecuencia_pedido]|lower }})</div></div>
+</div>
+
+<div class="card">
+  <h2>Stock actual</h2>
+  <p class="muted">Prendas por segmento y tipo. Debajo, los días que cubre al ritmo de venta de las últimas 4 semanas.</p>
+  {{ rejilla(m, stock, extra=cobertura) }}
+</div>
+
+<details class="card" open>
+  <summary>Registrar ventas</summary>
+  <p class="muted">Las ventas restan stock y son la base del pedido automático.</p>
+  <form method="post" action="{{ url_for('tienda.ventas', tid=t.id) }}">{{ csrf() }}
+    <label>Fecha</label><input type="date" name="fecha" value="{{ hoy.isoformat() }}" max="{{ hoy.isoformat() }}" style="max-width:200px">
+    {{ rejilla(m, None, input='v', placeholder='0') }}
+    <p><button>Registrar ventas</button></p>
+  </form>
+</details>
+
+<details class="card">
+  <summary>Pedido adicional</summary>
+  <p class="muted">Se suma al automático. 1 caja ≈ {{ KG_POR_CAJA }} kg (las cajas van mixtas). Los pedidos se cierran el viernes anterior a la semana de entrega.</p>
+  <form method="post" action="{{ url_for('tienda.pedido', tid=t.id) }}">{{ csrf() }}
+    <div class="row">
+      <div><label>Semana de entrega</label>
+        <select name="semana">{% for s in semanas %}<option>{{ s }}</option>{% endfor %}</select></div>
+      <div><label><input type="checkbox" name="urgente"> Urgente</label>
+        <div class="ayuda">Se señala a la central; el reparto sigue la planificación semanal.</div></div>
+    </div>
+    {{ rejilla(m, None, input='p', placeholder='0') }}
+    <label>Comentario para la central</label><textarea name="comentario" rows="2"></textarea>
+    <p><button>Enviar pedido adicional</button></p>
+  </form>
+</details>
+
+<details class="card">
+  <summary>Pedido automático</summary>
+  <div class="row">
+    <form method="post" action="{{ url_for('tienda.config', tid=t.id) }}">{{ csrf() }}
+      <label><input type="checkbox" name="pedido_auto_activo" {{ 'checked' if t.pedido_auto_activo }}> Generar pedidos automáticos</label>
+      <label>Frecuencia</label>
+      <select name="frecuencia_pedido">{% for k, v in FRECUENCIAS.items() %}<option value="{{ k }}" {{ 'selected' if k == t.frecuencia_pedido }}>{{ v }}</option>{% endfor %}</select>
+      <label>Día de pedido</label>
+      <input type="number" name="dia_pedido" min="0" max="28" value="{{ t.dia_pedido }}">
+      <div class="ayuda">Semanal: 0 = lunes … 4 = viernes. Mensual: día del mes (1–28). Diaria: se ignora (L-V).</div>
+      <label>Días de stock de seguridad</label>
+      <input type="number" name="dias_seguridad" min="0" max="60" value="{{ t.dias_seguridad }}">
+      <p><button>Guardar</button></p>
+    </form>
+    <div>
+      <p><b>Cómo se calcula:</b> por cada prenda, venta media diaria (últimas 4 semanas) × (días hasta el próximo pedido + días de seguridad) − stock − lo que ya viene en camino.</p>
+      <p>Si se generase hoy pediría:</p>
+      {% if propuesta %}{{ rejilla(m, propuesta) }}{% else %}<p class="muted">Nada: el stock cubre el periodo.</p>{% endif %}
+    </div>
+  </div>
+</details>
+
+<details class="card">
+  <summary>Poner / quitar prendas (ajuste de inventario)</summary>
+  <p class="muted">Números positivos suman, negativos restan (recuento, mermas, prendas retiradas…). No usar para ventas ni recepciones.</p>
+  <form method="post" action="{{ url_for('tienda.ajuste', tid=t.id) }}">{{ csrf() }}
+    <label>Motivo</label>
+    <select name="motivo" style="max-width:260px"><option value="inventario">Recuento de inventario</option>
+      <option value="merma">Merma / prenda dañada</option><option value="retirada">Retirada de prendas</option>
+      <option value="entrada_manual">Entrada manual</option></select>
+    {{ rejilla(m, None, input='a', minimo=none, placeholder='±0') }}
+    <p><button>Aplicar ajuste</button></p>
+  </form>
+</details>
+
+<div class="card">
+  <h2>Pedidos</h2>
+  <div class="scroll"><table>
+    <tr><th>Pedido</th><th>Tipo</th><th>Semana</th><th>Estado</th><th class="n">Prendas</th><th class="n">kg</th><th class="n">Cajas</th>
+      <th>Ruta</th><th>Contenido</th><th></th></tr>
+    {% for p in pedidos %}
+    <tr>
+      <td>{{ p.codigo }}{% if p.urgente %} <span class="pill cancelado">urgente</span>{% endif %}<div class="ayuda">{{ p.creado.strftime('%d/%m %H:%M') }}</div></td>
+      <td>{{ estado(p.tipo, {'automatico': 'Automático', 'adicional': 'Adicional'}) }}</td>
+      <td>{{ p.semana_entrega }}</td><td>{{ estado(p.estado) }}</td>
+      <td class="n">{{ p.unidades|miles }}</td><td class="n">{{ p.kg|miles(1) }}</td><td class="n">{{ p.cajas }}</td>
+      <td>{% if p.viaje %}{{ p.viaje.nombre }}<div class="ayuda">{{ p.viaje.salida }}{% if p.viaje.camion %} · {{ p.viaje.camion.matricula }}{% endif %}</div>{% else %}—{% endif %}</td>
+      <td class="ayuda" style="max-width:320px">{{ lineas(p) }}{% if p.comentario %}<br><i>{{ p.comentario }}</i>{% endif %}</td>
+      <td>
+        {% if p.estado == 'pendiente' %}
+        <form class="inline" method="post" action="{{ url_for('tienda.cancelar', tid=t.id, pid=p.id) }}">{{ csrf() }}<button class="sec">Cancelar</button></form>
+        {% elif p.estado == 'en_reparto' %}
+        <form class="inline" method="post" action="{{ url_for('tienda.recibir', tid=t.id, pid=p.id) }}">{{ csrf() }}<button>Confirmar recepción</button></form>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}<tr><td colspan="10" class="muted">Sin pedidos todavía.</td></tr>{% endfor %}
+  </table></div>
+</div>
+{% endblock %}

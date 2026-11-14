@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Movimientos de stock</h1>
+<p class="muted">Últimos 500 cambios de stock en tiendas y plantas (prendas) y almacenes (cajas).</p>
+<form method="get" class="tools"><input name="entidad_id" value="{{ ent }}" placeholder="TD-001, PL-MAD, AL-MADRID…"><button class="sec">Filtrar</button></form>
+<div class="card scroll"><table>
+  <tr><th>Fecha</th><th>Dónde</th><th>Categoría</th><th class="n">Cambio</th><th>Motivo</th><th>Referencia</th><th>Usuario</th></tr>
+  {% for m in filas %}
+  <tr><td>{{ m.fecha.strftime('%d/%m/%Y %H:%M') }}</td><td>{{ ROLES[m.entidad] }} {{ m.entidad_id }}</td>
+    <td>{{ m.categoria_id or 'cajas' }}</td><td class="n {{ 'ok' if m.delta > 0 else 'err' }}">{{ '%+d'|format(m.delta) }}</td>
+    <td>{{ m.motivo }}</td><td>{{ m.referencia or '' }}</td><td>{{ m.usuario.username if m.usuario else '—' }}</td></tr>
+  {% else %}<tr><td colspan="7" class="muted">Sin movimientos.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

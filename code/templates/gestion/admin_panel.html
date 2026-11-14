@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% from "gestion/_m.html" import csrf, barra, alertas as alertas_m with context %}
+{% block body %}
+<h1>Panel de administración</h1>
+<div class="kpis" style="margin-bottom:16px">
+  <div class="kpi"><div class="v">{{ kpi.tiendas }}</div><div class="l">tiendas activas</div></div>
+  <div class="kpi"><div class="v">{{ kpi.plantas }}</div><div class="l">plantas activas</div></div>
+  <div class="kpi"><div class="v">{{ kpi.almacenes }}</div><div class="l">almacenes</div></div>
+  <div class="kpi"><div class="v">{{ kpi.camiones_t }} + {{ kpi.camiones_r }}</div><div class="l">camiones troncal + reparto</div></div>
+  <div class="kpi"><div class="v">{{ kpi.pedidos_sem }}</div><div class="l">pedidos para {{ sem }} ({{ kpi.kg_sem|miles }} kg)</div></div>
+  <div class="kpi"><div class="v">{{ kpi.en_reparto }}</div><div class="l">pedidos en reparto</div></div>
+  <div class="kpi"><div class="v">{{ kpi.stock_almacenes|miles }}</div><div class="l">cajas en almacenes de {{ kpi.max_almacenes|miles }}</div></div>
+</div>
+
+<div class="tools">
+  <a class="btn" href="{{ url_for('admin.planificacion', semana=sem) }}">Planificar la semana {{ sem }}</a>
+  <form method="post" action="{{ url_for('admin.automaticos') }}" style="margin:0">{{ csrf() }}<button class="sec">Generar pedidos automáticos pendientes</button></form>
+</div>
+
+<div class="card">
+  <h2>Alertas</h2>
+  {{ alertas_m(alertas) }}{% if not alertas %}<p class="ok">Todo en orden.</p>{% endif %}
+</div>
+
+<div class="row">
+  <div class="card">
+    <h2>Plantas</h2>
+    <table><tr><th>Planta</th><th class="n">Stock</th><th class="n">Máximo</th><th>Ocupación</th></tr>
+      {% for p in plantas %}<tr><td><a href="{{ url_for('planta.panel', pid=p.id) }}">{{ p.nombre }}</a></td>
+        <td class="n">{{ p.stock_prendas|miles }}</td><td class="n">{{ p.stock_max_prendas|miles }}</td><td>{{ barra(p.ocupacion) }}</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h2>Almacenes (más llenos primero)</h2>
+    <div style="max-height:420px;overflow-y:auto">
+    <table><tr><th>Almacén</th><th class="n">Cajas</th><th class="n">Máx.</th><th>Ocupación</th></tr>
+      {% for a in almacenes %}<tr><td><a href="{{ url_for('almacen.panel', aid=a.id) }}">{{ a.provincia }}</a></td>
+        <td class="n">{{ a.stock_cajas }}</td><td class="n">{{ a.stock_max_cajas }}</td><td>{{ barra(a.ocupacion) }}</td></tr>{% endfor %}
+    </table></div>
+  </div>
+</div>
+{% endblock %}

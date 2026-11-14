@@ -4,7 +4,7 @@
 <div class="row">
   <div class="card">
     <h2>Generar rutas</h2>
-    <form method="post" action="{{ url_for('optimizar') }}">
+    <form method="post" action="{{ url_for('optimizar') }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
       <input type="hidden" name="semana" value="{{ semana }}">
       <label>Demanda</label>
       <select name="fuente">

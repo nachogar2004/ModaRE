@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% from "gestion/_m.html" import csrf, estado, barra, alertas as alertas_m with context %}
+{% block title %}{{ a.nombre }} · Moda re-{% endblock %}
+{% block body %}
+<h1>{{ a.nombre }}</h1>
+<p class="muted">{{ a.id }} · {{ a.poligono or '' }}, {{ a.municipio or '' }} ({{ a.provincia }}) · abre {{ a.dias_recepcion }} {{ a.hora_inicio }}–{{ a.hora_fin }}
+  · repone {{ a.planta.nombre if a.planta else '—' }}</p>
+{{ alertas_m(alertas) }}
+
+<div class="kpis" style="margin-bottom:16px">
+  <div class="kpi"><div class="v">{{ a.stock_cajas|miles }} <span class="muted" style="font-size:15px">/ {{ a.stock_max_cajas|miles }}</span></div>
+    <div class="l">cajas en stock ({{ a.ocupacion|pct }}){{ barra(a.ocupacion) }}</div></div>
+  <div class="kpi"><div class="v">+{{ previsto_in }}</div><div class="l">cajas por recibir de planta</div></div>
+  <div class="kpi"><div class="v">−{{ previsto_out }}</div><div class="l">cajas por enviar a tiendas</div></div>
+  {% set prev = a.stock_cajas + previsto_in - previsto_out %}
+  <div class="kpi"><div class="v {{ 'err' if prev > a.stock_max_cajas or prev < 0 else '' }}">{{ prev }}</div><div class="l">stock previsto tras la semana</div></div>
+</div>
+
+<details class="card">
+  <summary>Ajustar stock de cajas</summary>
+  <form method="post" action="{{ url_for('almacen.ajuste', aid=a.id) }}">{{ csrf() }}
+    <div class="row">
+      <div><label>Cajas (+ entran / − salen)</label><input type="number" name="delta" step="1" required></div>
+      <div><label>Motivo</label><select name="motivo"><option value="inventario">Recuento de inventario</option>
+        <option value="merma">Caja dañada</option><option value="devolucion">Devolución de tienda</option></select></div>
+    </div>
+    <p><button>Aplicar</button></p>
+  </form>
+</details>
+
+<div class="card">
+  <h2>Entradas desde planta</h2>
+  <div class="scroll"><table>
+    <tr><th>Código</th><th>Semana</th><th>Planta</th><th>Ruta / camión</th><th class="n">Cajas</th><th class="n">kg</th><th>Estado</th><th></th></tr>
+    {% for r in entrantes %}
+    <tr><td>{{ r.codigo }}</td><td>{{ r.semana }}</td><td>{{ r.planta.nombre }}</td>
+      <td>{% if r.viaje %}{{ r.viaje.nombre }} · {{ r.viaje.salida }}{% if r.viaje.camion %}<div class="ayuda">{{ r.viaje.camion.matricula }}</div>{% endif %}{% else %}—{% endif %}</td>
+      <td class="n">{{ r.cajas }}</td><td class="n">{{ r.kg|miles }}</td><td>{{ estado(r.estado, ESTADOS_REPOSICION) }}</td>
+      <td>{% if r.estado == 'expedida' %}<form class="inline" method="post" action="{{ url_for('almacen.recibir', aid=a.id, rid=r.id) }}">{{ csrf() }}<button>Recibir</button></form>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="8" class="muted">Sin reposiciones.</td></tr>{% endfor %}
+  </table></div>
+</div>
+
+<div class="card">
+  <h2>Salidas a tiendas</h2>
+  <div class="scroll"><table>
+    <tr><th>Pedido</th><th>Semana</th><th>Tienda</th><th>Tipo</th><th>Ruta / camión</th><th class="n">Cajas</th><th class="n">kg</th><th>Estado</th><th></th></tr>
+    {% for p in salientes %}
+    <tr><td>{{ p.codigo }}{% if p.urgente %} <span class="pill cancelado">urgente</span>{% endif %}</td><td>{{ p.semana_entrega }}</td>
+      <td>{{ p.tienda.nombre }}<div class="ayuda">{{ p.tienda.municipio }} · {{ p.tienda.ventana_inicio }}–{{ p.tienda.ventana_fin }}</div></td>
+      <td>{{ estado(p.tipo, {'automatico': 'Automático', 'adicional': 'Adicional'}) }}</td>
+      <td>{% if p.viaje %}{{ p.viaje.nombre }} · {{ p.viaje.salida }}{% if p.viaje.camion %}<div class="ayuda">{{ p.viaje.camion.matricula }}</div>{% endif %}{% else %}—{% endif %}</td>
+      <td class="n">{{ p.cajas }}</td><td class="n">{{ p.kg|miles(1) }}</td><td>{{ estado(p.estado) }}</td>
+      <td>{% if p.estado in ('planificado', 'confirmado') %}<form class="inline" method="post" action="{{ url_for('almacen.expedir', aid=a.id, pid=p.id) }}">{{ csrf() }}<button>Cargar en camión</button></form>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="9" class="muted">Sin pedidos confirmados.</td></tr>{% endfor %}
+  </table></div>
+</div>
+
+<div class="row">
+  <div class="card">
+    <h2>Rutas de reparto</h2>
+    <table><tr><th>Ruta</th><th>Semana</th><th>Salida</th><th>Recorrido</th><th class="n">km</th><th>Camión</th><th>Estado</th></tr>
+      {% for v in viajes %}<tr><td>{{ v.nombre }}</td><td>{{ v.semana }}</td><td>{{ v.salida }}</td><td class="ayuda">{{ v.recorrido }}</td>
+        <td class="n">{{ v.km|miles }}</td><td>{{ v.camion.matricula if v.camion else '—' }}</td><td>{{ estado(v.estado, ESTADOS_VIAJE) }}</td></tr>
+      {% else %}<tr><td colspan="7" class="muted">Sin rutas.</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h2>Vehículos de reparto</h2>
+    <table><tr><th>Matrícula</th><th>Tipo</th><th class="n">Cajas</th><th>Conductor</th><th>Estado</th></tr>
+      {% for c in a.camiones %}<tr><td>{{ c.matricula }}</td><td>{{ c.tipo_vehiculo }}</td><td class="n">{{ c.capacidad_cajas }}</td>
+        <td>{{ c.conductor or '—' }}</td><td>{{ estado(c.estado, ESTADOS_CAMION) }}</td></tr>{% endfor %}
+    </table>
+    <h2 style="margin-top:14px">Tiendas que sirve habitualmente</h2>
+    <p class="ayuda">{% for t in tiendas %}{{ t.nombre }}{{ ' · ' if not loop.last }}{% endfor %}</p>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Entrar · Moda re-{% endblock %}
+{% block body %}
+<div class="card" style="max-width:420px;margin:40px auto">
+  <h1>Iniciar sesión</h1>
+  <p class="muted">Tiendas, plantas, almacenes y administración de la red de transporte.</p>
+  <form method="post">
+    <label>Usuario</label><input name="username" autofocus autocomplete="username" placeholder="td-001, pl-mad, al-madrid, admin">
+    <label>Contraseña</label><input type="password" name="password" autocomplete="current-password">
+    <p><button>Entrar</button></p>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% from "gestion/_m.html" import csrf, estado, barra with context %}
+{% block body %}
+<h1>{{ e.titulo }} <span class="muted" style="font-size:15px">({{ filas|length }})</span></h1>
+<div class="tools">
+  <a class="btn" href="{{ url_for('admin.editar', ent=ent) }}">+ Añadir {{ e.singular }}</a>
+  {% if e.filtros %}
+  <form method="get" class="tools" style="margin:0">
+    <input name="q" value="{{ filtro }}" placeholder="Buscar…">
+    {% if request.args.get('todos') %}<input type="hidden" name="todos" value="1">{% endif %}
+    <button class="sec">Buscar</button>
+  </form>{% endif %}
+  {% if e.activo %}
+    {% if request.args.get('todos') %}<a href="{{ url_for('admin.lista', ent=ent, q=filtro) }}">Ocultar los dados de baja</a>
+    {% else %}<a href="{{ url_for('admin.lista', ent=ent, q=filtro, todos=1) }}">Mostrar también los dados de baja</a>{% endif %}
+  {% endif %}
+  {% if ent in ('tiendas', 'plantas', 'almacenes') %}
+  <form method="post" action="{{ url_for('admin.exportar') }}" style="margin:0">{{ csrf() }}
+    <button class="sec" title="Escribe data/*.csv para la librería de rutas">Exportar a la librería de rutas</button></form>
+  {% endif %}
+</div>
+<div class="card scroll">
+<table>
+  <tr>{% for a, h in e.columnas %}<th>{{ h }}</th>{% endfor %}<th></th></tr>
+  {% for o in filas %}
+  {% set oid = o.id %}
+  <tr>
+    {% for a, h in e.columnas %}{% set v = o[a] %}
+    <td>
+      {% if a == 'ocupacion' %}{{ v|pct }}{{ barra(v) }}
+      {% elif v is sameas true %}✓{% elif v is sameas false %}<span class="err">✗</span>
+      {% elif a == 'estado' %}{{ estado(v, ESTADOS_CAMION) }}
+      {% elif a == 'rol' %}{{ ROLES[v] }}
+      {% elif v is number %}{{ v|miles(2 if v is float and v < 10 else 0) }}
+      {% elif loop.first and e.enlace %}<a href="{{ e.enlace(o) }}">{{ v }}</a>
+      {% else %}{{ v if v is not none else '—' }}{% endif %}
+    </td>
+    {% endfor %}
+    <td style="white-space:nowrap">
+      <a href="{{ url_for('admin.editar', ent=ent, oid=oid) }}">Editar</a>
+      <form class="inline" method="post" action="{{ url_for('admin.borrar', ent=ent, oid=oid) }}"
+            onsubmit="return confirm('¿Eliminar {{ e.singular }} {{ oid }}? Si tiene historial se dará de baja.')">{{ csrf() }}
+        <button class="sec">Eliminar</button></form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

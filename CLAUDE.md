@@ -103,7 +103,8 @@ Los **camiones físicos** = máximo de rutas solapadas por (depósito, tarifa): 
 
 ```
 code/
-  app.py              Flask: /tienda (pedido de cada tienda) y /central (optimizar + mapa)
+  app.py              Flask: monta la app de gestión (gestion/) y /central (optimizador avanzado + mapa, solo admin)
+  gestion/            app de gestión del transporte con usuarios y roles (ver «App de gestión» más abajo)
   optimizar.py        CLI
   generar_almacenes.py  crea data/almacenes.csv (sintético) a partir de tiendas.csv
   modare/config.py    rutas y supuestos que NO están en parametros.csv (kg/caja, pausas, CO2/L…)
@@ -114,7 +115,7 @@ code/
   modare/visualizar.py    genera salidas/<semana>/mapa.html
   modare/osrm.py      cliente OSRM: matriz de distancias y trazados de rutas (1 petición/s, con caché)
   calcular_distancias.py  regenera data/distancias.csv por carretera
-  templates/          HTML de la app (Leaflet para el mapa)
+  templates/          HTML de la app (Leaflet para el mapa); templates/gestion/ = pantallas de la app de gestión
 ```
 
 ### Salidas (`code/salidas/<semana>/`, se sobrescriben en cada ejecución de esa semana)
@@ -140,7 +141,9 @@ python -m venv .venv
 .venv\Scripts\python optimizar.py --muestra --fuente estimacion --segundos 10   # prueba rápida (~15 s)
 .venv\Scripts\python optimizar.py --semana 2026-W47 --segundos 30               # red completa (~60 s)
 .venv\Scripts\python app.py                                                      # http://127.0.0.1:5000
+.venv\Scripts\python -m gestion.semilla --reset                                 # rehace gestion.db desde data/*.csv
 ```
+En macOS: `.venv/bin/python …` y `PORT=5050 .venv/bin/python app.py` (AirPlay ocupa el 5000).
 Opciones CLI: `--fuente mixto|pedidos|estimacion`, `--asignacion optimo|actual`, `--plantas-futuras`,
 `--precio-co2 80` (€/t en el objetivo), `--secuencial` (sin portafolio, para depurar).
 En consola de Windows usad `PYTHONIOENCODING=utf8` si salen caracteres raros.
@@ -163,6 +166,45 @@ La primera ejecución tarda ~1 min más porque pide a OSRM el trazado de cada ru
 **Ojo al comparar con el modelo directo anterior** (planta → tienda: 17.025 €, 19 camiones): el coste de dos
 escalones **no incluye operar los almacenes** (manipulación, alquiler, personal), que hoy vale 0; y los camiones
 físicos del reparto se cuentan por almacén (cada almacén necesita al menos uno).
+
+## App de gestión (`code/gestion/`, BD `code/gestion.db`)
+
+Aplicación web con login por roles sobre la misma app Flask. La BD (SQLite, SQLAlchemy) se crea y se rellena
+sola desde `data/*.csv` la primera vez que se arranca `app.py` (`gestion/semilla.py`).
+
+| Rol | Usuario | Qué ve y hace |
+|---|---|---|
+| **Tienda** | `td-001`… | Stock en **prendas** por segmento (Mujer/Hombre/Niños) × tipo (arriba, abajo, abrigos, zapatos, bolsos) con días de cobertura; registra **ventas**; **poner/quitar prendas** (ajuste de inventario); configura su **pedido automático** (diario L-V / semanal / mensual, día, días de seguridad); hace **pedidos adicionales**; confirma la recepción |
+| **Planta** | `pl-mad`… | Stock en prendas por categoría y **stock máximo**; entradas de clasificación; **expide** las reposiciones a almacenes (descuenta stock); sus camiones troncales y rutas |
+| **Almacén** | `al-madrid`… | Stock en **cajas mixtas** frente a su **máximo** (alerta si lo supera, también con lo previsto); **recibe** reposiciones; **carga** los pedidos de tienda en el camión de reparto |
+| **Admin** | `admin` | Todo: alta/baja/edición de usuarios, tiendas, plantas, almacenes, camiones troncales, camiones de reparto y categorías; ve pedidos, movimientos de stock y alertas; planificación semanal |
+
+Contraseñas iniciales: `admin`/`admin` y `modare2026` para el resto (variables `MODARE_PASSWORD_ADMIN`,
+`MODARE_PASSWORD_INICIAL`; `MODARE_SECRET_KEY` para la sesión). Al dar de alta una tienda/planta/almacén se crea
+su usuario con contraseña aleatoria. Borrar algo con historial lo **da de baja** (se conserva el histórico).
+
+**Tablas** (`gestion/modelos.py`): `usuarios`, `categorias`, `plantas` + `stock_planta`, `almacenes`, `tiendas` +
+`stock_tienda`, `ventas`, `pedidos` + `lineas_pedido`, `camiones_troncal` (planta→almacén), `camiones_reparto`
+(almacén→tienda), `viajes` (rutas del plan con su camión), `reposiciones` + `lineas_reposicion` (envío troncal),
+`movimientos` (auditoría de stock), `ajustes`.
+
+**Pedido automático** (`gestion/logistica.py`): en el día que toca, por categoría,
+`venta media diaria (4 semanas) × (días del periodo + días de seguridad) − stock − pedido en camino`;
+no se genera si pesa menos de media caja. Se generan solos con la primera petición del día (y botón en el panel admin).
+Lo pedido de lunes a viernes se entrega la semana siguiente (cierre el viernes).
+
+**Ciclo semanal** (Admin → Planificación): 1) *cerrar semana* → pedidos `confirmado` y suma por tienda en
+`modare.pedidos` (lo que lee el optimizador); 2) *optimizar* → `gestion/optimizador.py` exporta tiendas/plantas/almacenes
+a `data/*.csv`, ejecuta `planificar(fuente="pedidos")` e **importa `plan.json`**: crea los viajes, asigna a cada ruta
+un camión libre de su base (mismo tipo o el más pequeño con capacidad; editable a mano) y crea una reposición por almacén
+con la mezcla de prendas de sus pedidos; 3) planta expide → almacén recibe (+cajas) → almacén carga (−cajas) →
+tienda recibe (+prendas). **`gestion/optimizador.py` es el único módulo que conoce la librería de rutas**: si cambia, solo se adapta ese.
+
+Supuestos SINTÉTICOS de la semilla (editables en la app): peso y precio por prenda de cada categoría, stock inicial
+(planta 60 % del máximo = 3 semanas de salida; almacén 25 % de un máximo = 2 semanas de capacidad; tienda ≈ 4 días de venta),
+8 semanas de ventas simuladas a partir de `ventas_periodo`, frecuencia de pedido (pequeñas mensual, resto semanal el jueves)
+y flota (3 camiones troncales por planta + tráiler en BCN; 1 furgoneta por almacén + rígido 7,5 t si ≥ 3.000 kg/semana).
+Pendiente: el plan troncal y el reparto se ejecutan la misma semana en la app (el optimizador supone stock W → reparto W+1).
 
 ## Supuestos y limitaciones (decidlos/validadlos con la ONG)
 - **Almacenes inventados** (qué polígono, capacidad, horario): ver `almacenes.csv`, `modare/poligonos.py` y `generar_almacenes.py`.

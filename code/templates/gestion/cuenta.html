@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% from "gestion/_m.html" import csrf with context %}
+{% block body %}
+<h1>Mi cuenta</h1>
+<div class="card" style="max-width:520px">
+  <p class="muted">Usuario <b>{{ current_user.username }}</b> · {{ ROLES[current_user.rol] }}
+    {% if current_user.entidad_id %} · {{ current_user.entidad_id }}{% endif %}</p>
+  <form method="post">{{ csrf() }}
+    <label>Nombre</label><input name="nombre" value="{{ current_user.nombre or '' }}">
+    <label>Email</label><input type="email" name="email" value="{{ current_user.email or '' }}">
+    <label>Contraseña actual</label><input type="password" name="actual" required autocomplete="current-password">
+    <label>Nueva contraseña</label><input type="password" name="nueva" required minlength="8" autocomplete="new-password">
+    <label>Repite la nueva contraseña</label><input type="password" name="repetir" required minlength="8" autocomplete="new-password">
+    <p><button>Guardar</button></p>
+  </form>
+</div>
+{% endblock %}

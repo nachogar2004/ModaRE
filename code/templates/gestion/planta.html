@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% from "gestion/_m.html" import csrf, estado, barra, alertas as alertas_m, rejilla, lineas with context %}
+{% block title %}{{ p.nombre }} · Moda re-{% endblock %}
+{% block body %}
+<h1>{{ p.nombre }}</h1>
+<p class="muted">{{ p.id }} · {{ p.direccion or '' }} {{ p.municipio }} ({{ p.provincia }}) · carga {{ p.hora_inicio_carga }}–{{ p.hora_fin_carga }}
+  {% if not p.activa %}<span class="pill cancelado">inactiva{% if p.apertura_prevista %} · apertura {{ p.apertura_prevista }}{% endif %}</span>{% endif %}</p>
+{{ alertas_m(alertas) }}
+
+<div class="kpis" style="margin-bottom:16px">
+  <div class="kpi"><div class="v">{{ p.stock_prendas|miles }}</div><div class="l">prendas en stock de {{ p.stock_max_prendas|miles }} máx.{{ barra(p.ocupacion) }}</div></div>
+  <div class="kpi"><div class="v">{{ p.capacidad_salida_kg_semana|miles }}</div><div class="l">kg/semana de capacidad de salida</div></div>
+  <div class="kpi"><div class="v">{{ reps|selectattr('estado', 'equalto', 'planificada')|list|length }}</div><div class="l">reposiciones por expedir</div></div>
+  <div class="kpi"><div class="v">{{ p.camiones|rejectattr('estado', 'equalto', 'baja')|list|length }}</div><div class="l">camiones troncales</div></div>
+</div>
+
+<div class="card">
+  <h2>Stock actual</h2>
+  {{ rejilla(m, stock) }}
+</div>
+
+<details class="card">
+  <summary>Poner / quitar prendas</summary>
+  <p class="muted">Positivo = entrada de prendas clasificadas; negativo = salidas que no son reposiciones (mermas, ventas a terceros…).</p>
+  <form method="post" action="{{ url_for('planta.ajuste', pid=p.id) }}">{{ csrf() }}
+    <label>Motivo</label>
+    <select name="motivo" style="max-width:260px"><option value="clasificacion">Entrada de clasificación</option>
+      <option value="inventario">Recuento de inventario</option><option value="merma">Merma</option>
+      <option value="salida_otros">Salida a otros canales</option></select>
+    {{ rejilla(m, None, input='a', minimo=none, placeholder='±0') }}
+    <p><button>Aplicar</button></p>
+  </form>
+</details>
+
+<div class="card">
+  <h2>Reposiciones a almacenes</h2>
+  <p class="muted">Cajas mixtas con la mezcla de prendas de los pedidos de las tiendas de cada almacén. Al expedir se descuenta el stock.</p>
+  <div class="scroll"><table>
+    <tr><th>Código</th><th>Semana</th><th>Almacén</th><th>Ruta / camión</th><th class="n">Cajas</th><th class="n">kg</th><th>Estado</th><th>Contenido</th><th></th></tr>
+    {% for r in reps %}
+    <tr><td>{{ r.codigo }}</td><td>{{ r.semana }}</td><td>{{ r.almacen.nombre }}</td>
+      <td>{% if r.viaje %}{{ r.viaje.nombre }} · {{ r.viaje.salida }}{% if r.viaje.camion %}<div class="ayuda">{{ r.viaje.camion.matricula }} ({{ r.viaje.camion.tipo_vehiculo }})</div>{% endif %}{% else %}—{% endif %}</td>
+      <td class="n">{{ r.cajas }}</td><td class="n">{{ r.kg|miles }}</td><td>{{ estado(r.estado, ESTADOS_REPOSICION) }}</td>
+      <td class="ayuda" style="max-width:320px">{{ lineas(r) }}</td>
+      <td>{% if r.estado == 'planificada' %}<form class="inline" method="post" action="{{ url_for('planta.expedir', pid=p.id, rid=r.id) }}">{{ csrf() }}<button>Expedir</button></form>{% endif %}</td></tr>
+    {% else %}<tr><td colspan="9" class="muted">No hay reposiciones planificadas.</td></tr>{% endfor %}
+  </table></div>
+</div>
+
+<div class="row">
+  <div class="card">
+    <h2>Rutas troncales</h2>
+    <table><tr><th>Ruta</th><th>Semana</th><th>Salida</th><th>Recorrido</th><th class="n">km</th><th>Camión</th><th>Estado</th></tr>
+      {% for v in viajes %}<tr><td>{{ v.nombre }}</td><td>{{ v.semana }}</td><td>{{ v.salida }}</td><td class="ayuda">{{ v.recorrido }}</td>
+        <td class="n">{{ v.km|miles }}</td><td>{{ v.camion.matricula if v.camion else '—' }}</td><td>{{ estado(v.estado, ESTADOS_VIAJE) }}</td></tr>
+      {% else %}<tr><td colspan="7" class="muted">Sin rutas.</td></tr>{% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h2>Camiones de la planta</h2>
+    <table><tr><th>Matrícula</th><th>Tipo</th><th class="n">Cajas</th><th>Conductor</th><th>Estado</th></tr>
+      {% for c in p.camiones %}<tr><td>{{ c.matricula }}</td><td>{{ c.tipo_vehiculo }}</td><td class="n">{{ c.capacidad_cajas }}</td>
+        <td>{{ c.conductor or '—' }}</td><td>{{ estado(c.estado, ESTADOS_CAMION) }}</td></tr>{% endfor %}
+    </table>
+  </div>
+</div>
+{% endblock %}

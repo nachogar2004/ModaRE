@@ -30,14 +30,55 @@
   .row { display:flex; gap:16px; flex-wrap:wrap; } .row > * { flex:1 1 280px; }
   .scroll { overflow-x:auto; }
   .pill { display:inline-block; padding:1px 8px; border-radius:99px; background:#eee; font-size:12px; }
+  header { gap:16px; } header .sp { flex:1; } header button.link { background:none; color:#d6d3d1; padding:0; }
+  .bar { height:8px; background:#e7e5e4; border-radius:99px; overflow:hidden; min-width:80px; }
+  .bar > i { display:block; height:100%; background:var(--acc); }
+  .bar.warn > i { background:var(--warn); } .bar.err > i { background:var(--err); }
+  .pill.pendiente { background:#fef3c7; } .pill.confirmado { background:#e0e7ff; } .pill.planificado, .pill.planificada { background:#dbeafe; }
+  .pill.en_reparto, .pill.expedida, .pill.en_curso, .pill.en_ruta { background:#ffedd5; }
+  .pill.entregado, .pill.recibida, .pill.completado, .pill.disponible { background:var(--acc-2); }
+  .pill.cancelado, .pill.baja { background:#fee2e2; } .pill.mantenimiento { background:#fef3c7; }
+  .pill.adicional { background:#fae8ff; } .pill.automatico { background:#e0f2fe; }
+  table.grid input { width:72px; padding:4px 6px; text-align:right; }
+  table.grid td, table.grid th { text-align:right; } table.grid td:first-child, table.grid th:first-child { text-align:left; }
+  details.card > summary { cursor:pointer; font-weight:700; font-size:16px; }
+  details.card[open] > summary { margin-bottom:10px; }
+  .alerta { padding:8px 12px; border-radius:8px; margin-bottom:6px; background:#fef3c7; }
+  .alerta.err { background:#fee2e2; color:var(--err); }
+  .inline { display:inline; } .inline button { padding:4px 10px; font-size:13px; }
+  .formgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:0 18px; }
+  .ayuda { font-size:12px; color:var(--muted); margin-top:2px; }
+  input[type=checkbox] { width:auto; }
+  .tools { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
+  .tools input, .tools select { width:auto; }
 </style>
 {% block head %}{% endblock %}
 </head>
 <body>
 <header>
-  <b>Moda re- · Reparto semanal</b>
-  <a href="{{ url_for('tienda') }}" class="{{ 'on' if request.path.startswith('/tienda') }}">Tiendas</a>
-  <a href="{{ url_for('central') }}" class="{{ 'on' if request.path.startswith('/central') }}">Central</a>
+  <b>Moda re- · Transporte</b>
+  {% if current_user.is_authenticated %}
+    {% if current_user.rol == 'admin' %}
+      {% set ruta = request.path %}
+      <a href="{{ url_for('admin.panel') }}" class="{{ 'on' if ruta == '/admin/' }}">Panel</a>
+      <a href="{{ url_for('admin.planificacion') }}" class="{{ 'on' if ruta.startswith('/admin/planificacion') }}">Planificación</a>
+      <a href="{{ url_for('admin.pedidos') }}" class="{{ 'on' if ruta.startswith('/admin/pedidos') }}">Pedidos</a>
+      <a href="{{ url_for('admin.lista', ent='tiendas') }}" class="{{ 'on' if ruta.startswith('/admin/tiendas') }}">Tiendas</a>
+      <a href="{{ url_for('admin.lista', ent='plantas') }}" class="{{ 'on' if ruta.startswith('/admin/plantas') }}">Plantas</a>
+      <a href="{{ url_for('admin.lista', ent='almacenes') }}" class="{{ 'on' if ruta.startswith('/admin/almacenes') }}">Almacenes</a>
+      <a href="{{ url_for('admin.lista', ent='camiones-troncal') }}" class="{{ 'on' if ruta.startswith('/admin/camiones-troncal') }}">Camiones troncal</a>
+      <a href="{{ url_for('admin.lista', ent='camiones-reparto') }}" class="{{ 'on' if ruta.startswith('/admin/camiones-reparto') }}">Camiones reparto</a>
+      <a href="{{ url_for('admin.lista', ent='usuarios') }}" class="{{ 'on' if ruta.startswith('/admin/usuarios') }}">Usuarios</a>
+      <a href="{{ url_for('admin.movimientos') }}" class="{{ 'on' if ruta.startswith('/admin/movimientos') }}">Movimientos</a>
+      <a href="{{ url_for('central') }}" class="{{ 'on' if ruta.startswith('/central') }}">Optimizador</a>
+    {% else %}
+      <a href="{{ inicio_de(current_user) }}" class="on">Mi {{ ROLES[current_user.rol]|lower }}</a>
+    {% endif %}
+    <span class="sp"></span>
+    <a href="{{ url_for('auth.cuenta') }}">{{ current_user.username }} · {{ ROLES[current_user.rol] }}</a>
+    <form method="post" action="{{ url_for('auth.salir') }}" style="margin:0">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="link">Salir</button></form>
+  {% endif %}
 </header>
 <main>
   {% for cat, msg in get_flashed_messages(with_categories=true) %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}

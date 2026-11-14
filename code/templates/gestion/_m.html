@@ -1,0 +1,42 @@
+{# Macros comunes de la app de gestión #}
+
+{% macro csrf() %}<input type="hidden" name="_csrf" value="{{ csrf_token() }}">{% endmacro %}
+
+{% macro estado(e, textos=None) %}<span class="pill {{ e }}">{{ (textos or ESTADOS_PEDIDO).get(e, e) }}</span>{% endmacro %}
+
+{% macro barra(frac) %}
+  {% set cls = 'err' if frac > 1 else ('warn' if frac >= 0.9 else '') %}
+  <div class="bar {{ cls }}" title="{{ frac|pct }}"><i style="width:{{ [frac * 100, 100]|min }}%"></i></div>
+{% endmacro %}
+
+{% macro alertas(lista) %}
+  {% for nivel, txt in lista %}<div class="alerta {{ nivel }}">{{ txt }}</div>{% endfor %}
+{% endmacro %}
+
+{# Tabla segmento × tipo de prenda. valores: dict categoria_id -> número. input: prefijo de los campos o None #}
+{% macro rejilla(m, valores=None, input=None, extra=None, minimo=0, placeholder='') %}
+<div class="scroll"><table class="grid">
+  <tr><th></th>{% for c in m['Mujer'] %}<th>{{ c.tipo }}</th>{% endfor %}<th>Total</th></tr>
+  {% for seg, fila in m.items() %}
+  <tr><td><b>{{ seg }}</b></td>
+    {% for c in fila %}
+    <td>
+      {% if input %}
+        <input type="number" name="{{ input }}_{{ c.id }}" step="1" {% if minimo is not none %}min="{{ minimo }}"{% endif %}
+               value="{{ valores.get(c.id, '') if valores else '' }}" placeholder="{{ placeholder }}">
+      {% else %}
+        {{ (valores or {}).get(c.id, 0)|miles }}
+        {% if extra and extra.get(c.id) is not none %}<div class="ayuda">{{ extra.get(c.id) }}</div>{% endif %}
+      {% endif %}
+    </td>
+    {% endfor %}
+    {% set ns = namespace(t=0) %}{% for c in fila %}{% set ns.t = ns.t + ((valores or {}).get(c.id) or 0) %}{% endfor %}
+    <td>{% if not input %}<b>{{ ns.t|miles }}</b>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% endmacro %}
+
+{% macro lineas(obj) %}
+  {% for l in obj.lineas|sort(attribute='categoria.orden') %}{{ l.categoria.segmento[:3] }}·{{ l.categoria.tipo|lower }} {{ l.unidades }}{{ ', ' if not loop.last }}{% endfor %}
+{% endmacro %}

@@ -12,6 +12,8 @@ import time
 import urllib.parse
 import urllib.request
 
+from .osrm import contexto_ssl
+
 from . import config as C
 from .datos import haversine_km
 
@@ -64,7 +66,7 @@ MAX_KM = 80  # el resultado debe estar a menos de esto del centroide de las tien
 def _buscar(q: str) -> list[dict]:
     url = URL + "?" + urllib.parse.urlencode({"q": q, "format": "jsonv2", "limit": 10, "countrycodes": "es"})
     req = urllib.request.Request(url, headers={"User-Agent": "modare-prototipo/1.0"})
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with urllib.request.urlopen(req, timeout=30, context=contexto_ssl()) as r:
         out = json.loads(r.read().decode())
     time.sleep(1.1)  # política de uso de Nominatim: 1 petición/s
     return out

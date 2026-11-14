@@ -10,11 +10,24 @@ Si el servidor no responde, el plan sigue funcionando: los tramos sin trazado se
 from __future__ import annotations
 
 import json
+import ssl
 import time
 import urllib.error
 import urllib.request
 
 from . import config as C
+
+
+def contexto_ssl() -> ssl.SSLContext:
+    """HTTPS con los certificados de `certifi` si está instalado.
+
+    El Python de python.org en macOS no trae certificados raíz y falla con CERTIFICATE_VERIFY_FAILED
+    (las rutas salían como líneas rectas); con certifi funciona igual en cualquier ordenador."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
 
 URL = "https://router.project-osrm.org"
 PAUSA_S = 1.1
@@ -31,7 +44,7 @@ def _get(path: str, intentos: int = 4) -> dict:
         _ultima = time.time()
         try:
             req = urllib.request.Request(URL + path, headers={"User-Agent": "modare-prototipo/1.0"})
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with urllib.request.urlopen(req, timeout=60, context=contexto_ssl()) as r:
                 data = json.loads(r.read().decode())
             if data.get("code") == "Ok":
                 return data

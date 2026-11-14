@@ -1,16 +1,24 @@
-"""App web del prototipo.
+"""App web de Moda re-: gestión del transporte planta → almacén → tienda.
 
-  /tienda   -> el dueño de cada tienda indica cuántas cajas (o kg) necesita la semana siguiente
-  /central  -> la central ve los pedidos, lanza la optimización y consulta las rutas (mapa + tablas)
+  /entrar                 inicio de sesión (roles: admin, tienda, planta, almacén)
+  /tienda/<id>            stock por prenda, ventas, pedidos automáticos y adicionales, recepción
+  /planta/<id>            stock y expedición de reposiciones a los almacenes
+  /almacen/<id>           stock de cajas (máximo), recepción de reposiciones y salida de pedidos
+  /admin                  usuarios, red, camiones, pedidos y planificación semanal (gestion/)
+  /central                (admin) herramienta avanzada del optimizador: escenarios, mapa y analítica
 
-    .venv/Scripts/python app.py      ->  http://127.0.0.1:5000
+    .venv/bin/python app.py      ->  http://127.0.0.1:5000      (Windows: .venv/Scripts/python app.py)
 """
-import math
+import os
 import re
 import threading
 import traceback
 
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, url_for
+from flask_login import login_required
+
+import gestion
+from gestion import rol_requerido
 
 from modare import config as C
 from modare import pedidos as PED
@@ -18,7 +26,8 @@ from modare.datos import cargar_datos, demanda_estimada
 from modare.planificador import cargar_plan, planificar
 
 app = Flask(__name__)
-app.secret_key = "hackathon-modare"
+app.secret_key = os.environ.get("MODARE_SECRET_KEY", "hackathon-modare")   # cambiadla en producción
+gestion.init_app(app)
 DATOS = cargar_datos()
 TRABAJOS: dict[str, dict] = {}   # semana -> {"estado": "calculando"|"ok"|"error", "msg": str}
 
@@ -35,47 +44,9 @@ def _tiendas():
     return DATOS.tiendas.sort_values(["provincia", "nombre"])
 
 
-@app.route("/")
-def inicio():
-    return redirect(url_for("tienda"))
-
-
-@app.route("/tienda", methods=["GET", "POST"])
-def tienda():
-    semana = _sem(request.values.get("semana"))
-    tid = request.values.get("tienda") or ""
-    if request.method == "POST":
-        if request.form.get("accion") == "borrar":
-            PED.borrar(semana, tid)
-            flash("Pedido eliminado: se usará la estimación por ventas.")
-        else:
-            cajas = int(request.form.get("cajas") or 0)
-            kg = request.form.get("kg") or None
-            if cajas <= 0 and kg:
-                cajas = math.ceil(float(kg) / C.KG_POR_CAJA)
-            if cajas <= 0:
-                flash("Indica al menos una caja.", "error")
-            else:
-                PED.guardar(semana, tid, cajas, kg, request.form.get("comentario", ""))
-                flash(f"Pedido guardado: {cajas} cajas para la semana {semana}.")
-        return redirect(url_for("tienda", tienda=tid, semana=semana))
-
-    info = pedido = None
-    if tid:
-        t = DATOS.tiendas.set_index("id_tienda").loc[tid]
-        est = demanda_estimada(DATOS, PED.num_semana(semana)).get(tid, 0)
-        info = {"id": tid, "nombre": t.nombre, "municipio": t.municipio, "categoria": t.categoria_tamano,
-                "ventana": f"{t.dias_recepcion} {t.ventana_inicio}-{t.ventana_fin}",
-                "estim_kg": est, "estim_cajas": math.ceil(est / C.KG_POR_CAJA),
-                "max_cajas": int(DATOS.P[f"max_palets_entrega_{t.categoria_tamano}"]
-                                 * DATOS.P["kg_por_palet"] / C.KG_POR_CAJA),
-                "isla": t.acceso_carretera != 1}
-        pedido = PED.de_semana(semana).get(tid)
-    return render_template("tienda.html", tiendas=_tiendas(), semana=semana, tid=tid, info=info,
-                           pedido=pedido, kg_caja=C.KG_POR_CAJA)
-
-
 @app.route("/central")
+@login_required
+@rol_requerido()
 def central():
     semana = _sem(request.args.get("semana"))
     peds = PED.de_semana(semana)
@@ -100,6 +71,8 @@ def _lanzar(semana, kw):
 
 
 @app.post("/central/optimizar")
+@login_required
+@rol_requerido()
 def optimizar():
     semana = _sem(request.form.get("semana"))
     if TRABAJOS.get(semana, {}).get("estado") == "calculando":
@@ -114,11 +87,15 @@ def optimizar():
 
 
 @app.get("/central/estado")
+@login_required
+@rol_requerido()
 def estado():
     return jsonify(TRABAJOS.get(_sem(request.args.get("semana")), {}))
 
 
 @app.get("/central/plan")
+@login_required
+@rol_requerido()
 def plan():
     semana = _sem(request.args.get("semana"))
     p = cargar_plan(semana)
@@ -128,16 +105,21 @@ def plan():
 
 
 @app.get("/central/plan.json")
+@login_required
+@rol_requerido()
 def plan_json():
     p = cargar_plan(_sem(request.args.get("semana")))
     return jsonify(p) if p else abort(404)
 
 
 @app.get("/central/paradas.csv")
+@login_required
+@rol_requerido()
 def paradas_csv():
     f = C.SALIDAS_DIR / _sem(request.args.get("semana")) / "paradas.csv"
     return send_file(f, as_attachment=True) if f.exists() else abort(404)
 
 
 if __name__ == "__main__":
-    app.run(debug=True, use_reloader=False)
+    # en macOS el 5000 lo ocupa AirPlay: PORT=5050 python app.py
+    app.run(debug=True, use_reloader=False, port=int(os.environ.get("PORT", 5000)))

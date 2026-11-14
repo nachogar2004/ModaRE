@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "gestion/_m.html" import csrf with context %}
+{% block body %}
+<h1>{{ 'Nuevo' if alta else 'Editar' }} {{ e.singular }}{% if not alta %} · {{ obj.id }}{% endif %}</h1>
+<p><a href="{{ url_for('admin.lista', ent=ent) }}">← Volver a {{ e.titulo|lower }}</a></p>
+<div class="card">
+<form method="post">{{ csrf() }}
+  <div class="formgrid">
+  {% for c in e.campos %}
+    {% if not (c.solo_alta and not alta) %}
+    {% set v = form.get(c.nombre) if form else (obj[c.nombre] if c.tipo != 'password' else '') %}
+    <div>
+      {% if c.tipo == 'bool' %}
+        {% set marcado = (c.nombre in form) if form else (v if not alta else true) %}
+        <label><input type="checkbox" name="{{ c.nombre }}" {{ 'checked' if marcado }}> {{ c.etiqueta }}</label>
+      {% else %}
+        <label>{{ c.etiqueta }}{% if c.requerido %} *{% endif %}</label>
+        {% if c.tipo == 'select' %}
+          <select name="{{ c.nombre }}">
+            {% if not c.requerido %}<option value="">—</option>{% endif %}
+            {% for k, t in c.opciones() %}<option value="{{ k }}" {{ 'selected' if v is not none and k|string == v|string }}>{{ t }}</option>{% endfor %}
+          </select>
+        {% elif c.tipo == 'textarea' %}
+          <textarea name="{{ c.nombre }}" rows="2">{{ v or '' }}</textarea>
+        {% else %}
+          <input name="{{ c.nombre }}" value="{{ v if v is not none else '' }}"
+                 type="{{ {'int': 'number', 'float': 'text', 'date': 'date', 'password': 'password', 'time': 'time'}.get(c.tipo, 'text') }}"
+                 {% if c.tipo == 'float' %}inputmode="decimal"{% endif %}
+                 {% if c.requerido and c.tipo != 'password' %}required{% endif %}
+                 {% if c.tipo == 'password' %}autocomplete="new-password"{% endif %}>
+        {% endif %}
+      {% endif %}
+      {% if c.ayuda %}<div class="ayuda">{{ c.ayuda }}</div>{% endif %}
+    </div>
+    {% endif %}
+  {% endfor %}
+  </div>
+  {% if alta and ent in ('tiendas', 'plantas', 'almacenes') %}
+  <p class="muted">Se creará también su usuario de acceso con una contraseña aleatoria (se muestra una vez).</p>
+  {% endif %}
+  <p><button>Guardar</button></p>
+</form>
+</div>
+{% endblock %}
