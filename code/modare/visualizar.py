@@ -36,7 +36,42 @@ PLANTILLA = r"""<!doctype html>
   header { padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap; gap:6px 20px; align-items:baseline; }
   header h1 { font-size:17px; margin:0 12px 0 0; }
   .kpi { color:var(--muted); } .kpi b { color:var(--ink); font-variant-numeric:tabular-nums; }
-  main { display:grid; grid-template-columns: 360px 1fr; height: calc(100vh - 52px - 260px); min-height:380px; }
+  main { display:grid; grid-template-columns: 360px 1fr; height: calc(100vh - 52px - 40px - 260px); min-height:380px; }
+  /* pestañas y analíticas */
+  :root { --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; }
+  nav.tabs { display:flex; gap:2px; padding:0 12px; background:var(--panel); border-bottom:1px solid var(--line); overflow-x:auto; }
+  nav.tabs button { border:0; background:none; padding:10px 14px 8px; font:inherit; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap; }
+  nav.tabs button:hover { color:var(--ink); }
+  nav.tabs button.on { color:var(--ink); border-bottom-color:var(--accent); font-weight:600; }
+  .tab { display:none; } .tab.on { display:block; }
+  .panel { padding:14px 16px 32px; max-width:1500px; margin:0 auto; }
+  .panel h2 { font-size:16px; margin:0 0 4px; } .panel .sub { color:var(--muted); margin:0 0 12px; font-size:13px; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:14px; }
+  .tile { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .tile .k { color:var(--muted); font-size:12px; } .tile .v { font-size:20px; font-weight:600; font-variant-numeric:tabular-nums; margin-top:2px; }
+  .tile .d { color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ctrl { display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; margin-bottom:10px; font-size:13px; }
+  .ctrl label { color:var(--muted); } .ctrl select, .ctrl input, .ctrl button { font:inherit; padding:4px 8px; border:1px solid var(--line); border-radius:6px; background:#fff; color:var(--ink); }
+  .ctrl button { cursor:pointer; } .ctrl button:hover { background:#faf9f6; }
+  .tabla-wrap { background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:auto; max-height:calc(100vh - 330px); min-height:240px; }
+  .card .tabla-wrap { max-height:none; min-height:0; border:0; }
+  table.t { border-collapse:collapse; width:100%; font-size:13px; }
+  table.t th { position:sticky; top:0; z-index:1; background:#faf9f6; text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); cursor:pointer; white-space:nowrap; user-select:none; font-weight:600; color:#3b3f45; }
+  table.t th.n, table.t td.n { text-align:right; font-variant-numeric:tabular-nums; }
+  table.t td { padding:5px 8px; border-bottom:1px solid #f1efea; white-space:nowrap; }
+  table.t tfoot td { position:sticky; bottom:0; background:#faf9f6; font-weight:600; border-top:1px solid var(--line); }
+  table.t tbody tr:hover { background:#faf9f6; } table.t tr.click { cursor:pointer; }
+  table.t th[data-dir="asc"]::after { content:" ▲"; font-size:10px; } table.t th[data-dir="desc"]::after { content:" ▼"; font-size:10px; }
+  .m { color:var(--muted); font-size:12px; }
+  .stk { display:flex; gap:2px; height:10px; width:160px; } .stk i { display:block; height:100%; min-width:0; }
+  .stk i:first-child { border-radius:4px 0 0 4px; } .stk i:last-child { border-radius:0 4px 4px 0; } .stk i:only-child { border-radius:4px; }
+  .ley { display:inline-flex; flex-wrap:wrap; gap:4px 12px; font-size:12px; color:var(--muted); }
+  .ley i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:-1px; }
+  .nota { color:var(--muted); font-size:12px; margin:8px 0 0; line-height:1.5; }
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr)); gap:14px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; min-width:0; }
+  .card h3 { margin:0 0 8px; font-size:14px; display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; }
+  .aviso { color:#b42318; }
   #lista { overflow:auto; background:var(--panel); border-right:1px solid var(--line); }
   #map { height:100%; }
   .filtros { position:sticky; top:0; background:var(--panel); padding:8px 10px; border-bottom:1px solid var(--line); display:flex; flex-wrap:wrap; gap:6px; z-index:2; }
@@ -82,11 +117,47 @@ PLANTILLA = r"""<!doctype html>
 </head>
 <body>
 <header id="cab"></header>
+<nav class="tabs" id="tabs">
+  <button data-tab="mapa" class="on">Mapa y cronograma</button>
+  <button data-tab="tiendas">Coste por tienda</button>
+  <button data-tab="rutas-a">Rutas</button>
+  <button data-tab="almacenes">Almacenes</button>
+  <button data-tab="resumen">Resumen de costes</button>
+</nav>
+<div class="tab on" id="tab-mapa">
 <main>
   <div id="lista"><div class="filtros" id="filtros"></div><div id="rutas"></div></div>
   <div id="map"></div>
 </main>
 <section id="gantt"></section>
+</div>
+<div class="tab" id="tab-tiendas"><div class="panel">
+  <h2>Coste de llevar la ropa a cada tienda</h2>
+  <p class="sub">Coste por tienda = su parte del <b>troncal</b> (planta → almacén) + su parte del <b>reparto</b> (almacén → tienda). Clic en una fila para ver su ruta de reparto en el mapa.</p>
+  <div class="ctrl" id="ctrl-tiendas"></div>
+  <div class="tiles" id="tiles-tiendas"></div>
+  <div class="tabla-wrap" id="tabla-tiendas"></div>
+  <p class="nota" id="nota-tiendas"></p>
+</div></div>
+<div class="tab" id="tab-rutas-a"><div class="panel">
+  <h2>Coste por ruta</h2>
+  <p class="sub">Coste facturable de cada ruta (simulación exacta) y de qué se compone. Clic en una fila para verla en el mapa.</p>
+  <div class="ctrl" id="ctrl-rutas"></div>
+  <div class="tiles" id="tiles-rutas"></div>
+  <div class="tabla-wrap" id="tabla-rutas"></div>
+</div></div>
+<div class="tab" id="tab-almacenes"><div class="panel">
+  <h2>Almacenes (cross-dock)</h2>
+  <p class="sub">Lo que cuesta reponer cada almacén desde su planta y repartir desde él a sus tiendas. No incluye el coste de operar el almacén (hoy 0).</p>
+  <div class="ctrl" id="ctrl-almacenes"></div>
+  <div class="tabla-wrap" id="tabla-almacenes"></div>
+</div></div>
+<div class="tab" id="tab-resumen"><div class="panel">
+  <h2>Resumen de costes</h2>
+  <p class="sub">Dónde se va el dinero: por escalón, componente de la tarifa, tipo de vehículo, operador y planta.</p>
+  <div class="tiles" id="tiles-resumen"></div>
+  <div class="grid2" id="cards-resumen"></div>
+</div></div>
 
 <script>
 const PLAN = __DATOS__;
@@ -326,6 +397,371 @@ function filtrar(k, v) {
 }
 function refrescar(encuadrar) { pintarLista(); pintarGantt(); pintarMapa(encuadrar); }
 refrescar(true);
+
+// =====================================================================
+// ANALÍTICAS (pestañas)
+// =====================================================================
+const eur2 = (n, d = 2) => n.toLocaleString("es-ES", {minimumFractionDigits: d, maximumFractionDigits: d}) + " €";
+const pctf = (n, d = 0) => num(100 * n, d) + " %";
+const sum = (xs, f = x => x) => xs.reduce((s, x) => s + (f(x) || 0), 0);
+const nombreLugar = id => (lugares[id] && lugares[id].nombre) || id;
+const corto = id => String(id || "").replace(/^(PL|AL)-/, "");
+const COMP = [["km", "Kilómetros", "var(--s1)"], ["horas", "Horas", "var(--s2)"], ["fijo", "Fijo/día", "var(--s3)"], ["pernoctas", "Pernoctas", "var(--s4)"]];
+const ESCC = [["troncal", "Troncal", "var(--s1)"], ["reparto", "Reparto", "var(--s2)"]];
+function hav(a, b) {  // km en línea recta
+  const R = 6371, rad = Math.PI / 180, dLa = (b.lat - a.lat) * rad, dLo = (b.lon - a.lon) * rad;
+  const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLo / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function cuantil(xs, q) { if (!xs.length) return 0; const s = [...xs].sort((a, b) => a - b); const i = (s.length - 1) * q, lo = Math.floor(i);
+  return s[lo] + (s[Math.min(lo + 1, s.length - 1)] - s[lo]) * (i - lo); }
+function barra(partes, max) {  // partes: [[valor, color, etiqueta]]
+  const tot = sum(partes, p => p[0]); if (!tot || !max) return `<div class="stk"></div>`;
+  const ancho = 160 * tot / max;
+  return `<div class="stk" style="width:${Math.max(2, ancho)}px" title="${esc(partes.filter(p => p[0] > 0).map(p => `${p[2]}: ${eur(p[0])} (${pctf(p[0] / tot)})`).join(" · "))}">` +
+    partes.filter(p => p[0] > 0).map(p => `<i style="flex:${p[0]};background:${p[1]}"></i>`).join("") + `</div>`;
+}
+const leyenda_ = items => `<span class="ley">${items.map(([, t, c]) => `<span><i style="background:${c}"></i>${t}</span>`).join("")}</span>`;
+
+// ---------- tablas ordenables ----------
+const ORDEN = {};
+function pintarTabla(id, cols, filas, {onRow, pie, redraw, orden} = {}) {
+  const st = ORDEN[id] || (ORDEN[id] = orden ? {...orden} : {k: null, dir: -1});
+  if (st.k) {
+    const c = cols.find(c => c.k === st.k), v = c.v || (r => r[c.k]);
+    filas = [...filas].sort((a, b) => { const x = v(a), y = v(b);
+      return (typeof x === "string" ? String(x).localeCompare(String(y), "es") : (x ?? -Infinity) - (y ?? -Infinity)) * st.dir; });
+  }
+  let h = `<table class="t"><thead><tr>${cols.map(c => `<th class="${c.n ? "n" : ""}" data-k="${c.k}"` +
+    `${st.k === c.k ? ` data-dir="${st.dir > 0 ? "asc" : "desc"}"` : ""}${c.title ? ` title="${esc(c.title)}"` : ""}>${c.t}</th>`).join("")}</tr></thead><tbody>`;
+  filas.forEach((r, i) => { h += `<tr class="${onRow ? "click" : ""}" data-i="${i}">${cols.map(c => `<td class="${c.n ? "n" : ""}">${c.f ? c.f(r) : esc(r[c.k] ?? "")}</td>`).join("")}</tr>`; });
+  h += `</tbody>${pie ? `<tfoot><tr>${pie}</tr></tfoot>` : ""}</table>`;
+  const el = document.getElementById(id); el.innerHTML = h;
+  el.querySelectorAll("th").forEach(th => th.onclick = () => {
+    const k = th.dataset.k; if (k === "_") return;
+    if (st.k === k) st.dir = -st.dir; else { st.k = k; st.dir = cols.find(c => c.k === k).n ? -1 : 1; }
+    redraw && redraw();
+  });
+  if (onRow) el.querySelectorAll("tbody tr").forEach(tr => tr.onclick = () => onRow(filas[+tr.dataset.i]));
+}
+function descargarCSV(nombre, cabecera, filas) {
+  const q = v => typeof v === "number" ? String(v).replace(".", ",") : `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const txt = "﻿" + [cabecera.map(q).join(";"), ...filas.map(f => f.map(q).join(";"))].join("\r\n");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([txt], {type: "text/csv"}));
+  a.download = nombre; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function irAMapa(nombreRuta) {
+  mostrarTab("mapa");
+  filtroPlanta = null; filtroEscalon = null; marcarChips(); seleccion = null;
+  seleccionar(nombreRuta);
+}
+
+// ---------- reparto del coste de una ruta entre sus paradas ----------
+// "kg": a cada parada le toca coste × kg_parada / kg_ruta.
+// "kgkm": ponderado por kg × distancia en línea recta desde el depósito (las paradas lejanas pagan más).
+let MODO = "kg";
+function cuotas(r) {
+  const o = lugares[r.origen];
+  const w = r.paradas.map(p => MODO === "kgkm" && o ? p.kg * Math.max(1, hav(o, p)) : p.kg);
+  const W = sum(w);
+  return w.map(x => W ? r.coste_eur * x / W : r.coste_eur / r.paradas.length);
+}
+const tro = rutas.filter(r => r.escalon === "troncal"), rep = rutas.filter(r => r.escalon === "reparto");
+function calcular() {
+  const alm = {};
+  for (const a of PLAN.almacenes || []) alm[a.id] = {...a, kgRecibido: 0, cTro: 0, rutasTro: new Set(), kgRep: 0, cRep: 0, kmRep: 0, rutasRep: [], tiendasSet: new Set()};
+  const getAlm = id => alm[id] || (alm[id] = {id, nombre: nombreLugar(id), planta: "", kg: 0, capacidad: 0, kgRecibido: 0, cTro: 0, rutasTro: new Set(), kgRep: 0, cRep: 0, kmRep: 0, rutasRep: [], tiendasSet: new Set()});
+  for (const r of tro) {
+    const c = cuotas(r);
+    r.paradas.forEach((p, i) => { const a = getAlm(p.tienda); a.kgRecibido += p.kg; a.cTro += c[i]; a.rutasTro.add(r.nombre); });
+  }
+  const tiendas = {};
+  for (const r of rep) {
+    const c = cuotas(r), a = getAlm(r.origen);
+    a.cRep += r.coste_eur; a.kmRep += r.km; a.rutasRep.push(r.nombre);
+    r.paradas.forEach((p, i) => {
+      const t = tiendas[p.tienda] || (tiendas[p.tienda] = {id: p.tienda, nombre: p.nombre, municipio: p.municipio, lat: p.lat, lon: p.lon,
+        almacen: r.origen, planta: r.planta, kg: 0, visitas: 0, cRep: 0, rutas: [], tarde: 0});
+      t.kg += p.kg; t.visitas += 1; t.cRep += c[i]; if (!t.rutas.includes(r.nombre)) t.rutas.push(r.nombre);
+      if (!p.a_tiempo) t.tarde += 1;
+      a.kgRep += p.kg; a.tiendasSet.add(p.tienda);
+    });
+  }
+  for (const a of Object.values(alm)) {
+    a.eurKgTro = a.kgRecibido ? a.cTro / a.kgRecibido : 0;
+    a.eurKgRep = a.kgRep ? a.cRep / a.kgRep : 0;
+    a.total = a.cTro + a.cRep;
+    a.eurKg = a.eurKgTro + a.eurKgRep;
+    a.nTiendas = a.tiendasSet.size;
+    a.uso = a.capacidad ? a.kg / a.capacidad : 0;
+  }
+  for (const t of Object.values(tiendas)) {
+    const a = alm[t.almacen];
+    t.eurKgTro = a ? a.eurKgTro : 0;
+    t.cTro = t.kg * t.eurKgTro;          // el almacén es un depósito con stock: se reparte su €/kg troncal
+    t.total = t.cTro + t.cRep;
+    t.eurKg = t.kg ? t.total / t.kg : 0;
+    t.dist = a ? hav(a, t) : 0;
+  }
+  return {alm, tiendas: Object.values(tiendas)};
+}
+let CALC = calcular();
+
+// ---------- pestaña: coste por tienda ----------
+const FT = {planta: "", almacen: "", q: ""};
+function opcionesSel(lista, sel, todos) { return `<option value="">${todos}</option>` + lista.map(([v, t]) => `<option value="${esc(v)}"${v === sel ? " selected" : ""}>${esc(t)}</option>`).join(""); }
+function pintarCtrlTiendas() {
+  const plantas = [...new Set(CALC.tiendas.map(t => t.planta))].sort().map(p => [p, nombreLugar(p)]);
+  const almacenes = [...new Set(CALC.tiendas.filter(t => !FT.planta || t.planta === FT.planta).map(t => t.almacen))]
+    .map(a => [a, nombreLugar(a)]).sort((x, y) => x[1].localeCompare(y[1], "es"));
+  document.getElementById("ctrl-tiendas").innerHTML =
+    `<span><label>Reparto del coste de cada ruta </label><select id="t-modo">
+       <option value="kg"${MODO === "kg" ? " selected" : ""}>proporcional a kg</option>
+       <option value="kgkm"${MODO === "kgkm" ? " selected" : ""}>proporcional a kg × distancia al depósito</option></select></span>` +
+    `<span><label>Planta </label><select id="t-planta">${opcionesSel(plantas, FT.planta, "Todas")}</select></span>` +
+    `<span><label>Almacén </label><select id="t-almacen">${opcionesSel(almacenes, FT.almacen, "Todos")}</select></span>` +
+    `<span><input id="t-q" type="search" placeholder="Buscar tienda o municipio" value="${esc(FT.q)}"></span>` +
+    `<button id="t-csv">Descargar CSV</button>` + leyenda_(ESCC);
+  document.getElementById("t-modo").onchange = e => { MODO = e.target.value; CALC = calcular(); pintarAnaliticas(); };
+  document.getElementById("t-planta").onchange = e => { FT.planta = e.target.value; FT.almacen = ""; pintarCtrlTiendas(); pintarTiendas(); };
+  document.getElementById("t-almacen").onchange = e => { FT.almacen = e.target.value; pintarTiendas(); };
+  document.getElementById("t-q").oninput = e => { FT.q = e.target.value; pintarTiendas(); };
+  document.getElementById("t-csv").onclick = () => descargarCSV(`coste_tiendas_${R.semana}.csv`,
+    ["tienda", "nombre", "municipio", "almacen", "planta", "kg_semana", "visitas", "rutas", "km_almacen_linea_recta", "coste_troncal_eur", "coste_reparto_eur", "coste_total_eur", "eur_por_kg"],
+    filtrarTiendas().map(t => [t.id, t.nombre, t.municipio, t.almacen, t.planta, +t.kg.toFixed(1), t.visitas, t.rutas.join(" "), +t.dist.toFixed(1),
+      +t.cTro.toFixed(2), +t.cRep.toFixed(2), +t.total.toFixed(2), +t.eurKg.toFixed(4)]));
+}
+function filtrarTiendas() {
+  const q = FT.q.trim().toLowerCase();
+  return CALC.tiendas.filter(t => (!FT.planta || t.planta === FT.planta) && (!FT.almacen || t.almacen === FT.almacen) &&
+    (!q || (t.nombre + " " + t.municipio + " " + t.id).toLowerCase().includes(q)));
+}
+function pintarTiendas() {
+  const fs = filtrarTiendas(), max = Math.max(0, ...fs.map(t => t.total));
+  const ek = fs.map(t => t.eurKg), kg = sum(fs, t => t.kg), tot = sum(fs, t => t.total);
+  const cara = fs.reduce((m, t) => !m || t.eurKg > m.eurKg ? t : m, null), barata = fs.reduce((m, t) => !m || t.eurKg < m.eurKg ? t : m, null);
+  document.getElementById("tiles-tiendas").innerHTML = [
+    ["Tiendas", num(fs.length), `${num(kg)} kg/semana`],
+    ["Coste asignado", eur(tot), `${eur(sum(fs, t => t.cTro))} troncal + ${eur(sum(fs, t => t.cRep))} reparto`],
+    ["€/kg medio (ponderado)", kg ? eur2(tot / kg, 3) : "–", `mediana ${eur2(cuantil(ek, .5), 3)}`],
+    ["Rango €/kg (p10 – p90)", `${eur2(cuantil(ek, .1))} – ${eur2(cuantil(ek, .9))}`, "el 80 % de las tiendas está en este rango"],
+    ["Tienda más cara por kg", cara ? eur2(cara.eurKg, 3) : "–", cara ? cara.nombre : ""],
+    ["Tienda más barata por kg", barata ? eur2(barata.eurKg, 3) : "–", barata ? barata.nombre : ""],
+  ].map(([k, v, d]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="d" title="${esc(d)}">${esc(d)}</div></div>`).join("");
+  const cols = [
+    {k: "nombre", t: "Tienda", f: t => `${esc(t.nombre)} <span class="m">${esc(t.id)}</span>`},
+    {k: "municipio", t: "Municipio"},
+    {k: "almacen", t: "Almacén", v: t => nombreLugar(t.almacen), f: t => esc(corto(t.almacen))},
+    {k: "planta", t: "Planta", f: t => esc(corto(t.planta))},
+    {k: "kg", t: "kg/sem", n: 1, f: t => num(t.kg)},
+    {k: "visitas", t: "Entregas", n: 1, title: "Entregas en la semana (pasa el ratón para ver las rutas)",
+     f: t => `<span title="${esc(t.rutas.join(", "))}">${t.visitas}</span>` + (t.tarde ? ` <span class="aviso" title="entregas fuera de ventana">(${t.tarde} tarde)</span>` : "")},
+    {k: "dist", t: "km al almacén", n: 1, title: "Distancia en línea recta almacén → tienda", f: t => num(t.dist)},
+    {k: "cTro", t: "Troncal", n: 1, title: "kg de la tienda × €/kg troncal de su almacén", f: t => eur2(t.cTro)},
+    {k: "cRep", t: "Reparto", n: 1, title: "Parte de su(s) ruta(s) de reparto", f: t => eur2(t.cRep)},
+    {k: "total", t: "Total", n: 1, f: t => `<b>${eur2(t.total)}</b>`},
+    {k: "eurKg", t: "€/kg", n: 1, f: t => eur2(t.eurKg, 3)},
+    {k: "_", t: "Troncal · Reparto", f: t => barra([[t.cTro, "var(--s1)", "Troncal"], [t.cRep, "var(--s2)", "Reparto"]], max)},
+  ];
+  const pie = `<td>Total (${fs.length})</td><td></td><td></td><td></td><td class="n">${num(kg)}</td><td class="n">${sum(fs, t => t.visitas)}</td><td></td>` +
+    `<td class="n">${eur(sum(fs, t => t.cTro))}</td><td class="n">${eur(sum(fs, t => t.cRep))}</td><td class="n">${eur(tot)}</td><td class="n">${kg ? eur2(tot / kg, 3) : ""}</td><td></td>`;
+  pintarTabla("tabla-tiendas", cols, fs, {pie, redraw: pintarTiendas, orden: {k: "eurKg", dir: -1}, onRow: t => irAMapa(t.rutas[0])});
+  const totTro = sum(tro, r => r.coste_eur), totRep = sum(rep, r => r.coste_eur);
+  const asigTro = sum(CALC.tiendas, t => t.cTro), asigRep = sum(CALC.tiendas, t => t.cRep);
+  document.getElementById("nota-tiendas").innerHTML =
+    `<b>Cómo se calcula.</b> El coste de cada ruta (troncal o reparto) se reparte entre sus paradas ${MODO === "kg" ? "en proporción a los kg entregados" : "en proporción a kg × distancia en línea recta desde el depósito"}. ` +
+    `Como el almacén trabaja con stock, cada almacén tiene un <b>€/kg troncal</b> (coste troncal que le llega ÷ kg recibidos) y cada tienda paga ese €/kg por sus kg. ` +
+    `Es una convención de imputación, no una factura: el coste de una ruta compartida no tiene un reparto “verdadero”.<br>` +
+    `Cuadre: troncal ${eur(asigTro)} imputado de ${eur(totTro)} · reparto ${eur(asigRep)} de ${eur(totRep)}. ` +
+    `No incluye el coste de operar los almacenes.` +
+    ((PLAN.avisos || []).length ? ` <span class="aviso">${PLAN.avisos.length} tiendas de islas fuera del VRP (sin coste calculado): ${esc(PLAN.avisos.map(a => a.nombre).join(", "))}.</span>` : "");
+}
+
+// ---------- pestaña: rutas ----------
+const FR = {escalon: "", planta: "", operador: ""};
+function pintarCtrlRutas() {
+  const ops = [...new Set(rutas.map(r => r.operador))].sort().map(o => [o, o]);
+  document.getElementById("ctrl-rutas").innerHTML =
+    `<span><label>Escalón </label><select id="r-esc">${opcionesSel([["troncal", "Troncal"], ["reparto", "Reparto"]], FR.escalon, "Ambos")}</select></span>` +
+    `<span><label>Planta </label><select id="r-planta">${opcionesSel(PLAN.plantas.map(p => [p.id, p.nombre]), FR.planta, "Todas")}</select></span>` +
+    `<span><label>Operador </label><select id="r-op">${opcionesSel(ops, FR.operador, "Todos")}</select></span>` +
+    `<button id="r-csv">Descargar CSV</button>` + leyenda_(COMP);
+  document.getElementById("r-esc").onchange = e => { FR.escalon = e.target.value; pintarRutasA(); };
+  document.getElementById("r-planta").onchange = e => { FR.planta = e.target.value; pintarRutasA(); };
+  document.getElementById("r-op").onchange = e => { FR.operador = e.target.value; pintarRutasA(); };
+  document.getElementById("r-csv").onclick = () => descargarCSV(`coste_rutas_${R.semana}.csv`,
+    ["ruta", "escalon", "origen", "planta", "tipo", "operador", "salida", "vuelta", "paradas", "km", "horas", "kg", "ocupacion_cajas", "coste_eur", "eur_km", "eur_kg", "coste_km", "coste_horas", "coste_fijo", "coste_pernoctas", "co2_kg"],
+    filtrarRutas().map(r => { const d = r.desglose_coste || {}; return [r.nombre, r.escalon, r.origen, r.planta, r.tipo, r.operador, r.salida, r.vuelta, r.n_paradas,
+      r.km, r.horas_trabajo, r.kg, r.ocupacion_cajas, r.coste_eur, r.km ? +(r.coste_eur / r.km).toFixed(3) : 0, r.kg ? +(r.coste_eur / r.kg).toFixed(4) : 0,
+      d.km || 0, d.horas || 0, d.fijo || 0, d.pernoctas || 0, r.co2_kg]; }));
+}
+const filtrarRutas = () => rutas.filter(r => (!FR.escalon || r.escalon === FR.escalon) && (!FR.planta || r.planta === FR.planta) && (!FR.operador || r.operador === FR.operador));
+function pintarRutasA() {
+  const fs = filtrarRutas(), max = Math.max(0, ...fs.map(r => r.coste_eur));
+  const c = sum(fs, r => r.coste_eur), km = sum(fs, r => r.km), kg = sum(fs, r => r.kg);
+  const cara = fs.reduce((m, r) => !m || r.coste_eur > m.coste_eur ? r : m, null);
+  document.getElementById("tiles-rutas").innerHTML = [
+    ["Rutas", num(fs.length), `${num(sum(fs, r => r.n_paradas))} paradas`],
+    ["Coste", eur(c), `media ${fs.length ? eur(c / fs.length) : "–"} por ruta`],
+    ["€/km", km ? eur2(c / km) : "–", `${num(km)} km`],
+    ["€/kg movido", kg ? eur2(c / kg, 3) : "–", `${num(kg)} kg`],
+    ["Ocupación media (cajas)", fs.length ? pctf(sum(fs, r => r.ocupacion_cajas) / fs.length) : "–", `${num(sum(fs, r => r.noches))} pernoctas`],
+    ["Ruta más cara", cara ? eur(cara.coste_eur) : "–", cara ? `${cara.nombre} · ${VEH[cara.tipo] || cara.tipo}` : ""],
+  ].map(([k, v, d]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="d" title="${esc(d)}">${esc(d)}</div></div>`).join("");
+  const dz = (r, k) => (r.desglose_coste || {})[k] || 0;
+  const cols = [
+    {k: "nombre", t: "Ruta", f: r => `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${r.color};margin-right:5px"></span><b>${esc(r.nombre)}</b>`},
+    {k: "escalon", t: "Escalón", f: r => r.escalon === "troncal" ? "Troncal" : "Reparto"},
+    {k: "origen", t: "Origen", v: r => nombreLugar(r.origen), f: r => esc(corto(r.origen))},
+    {k: "tipo", t: "Vehículo", f: r => esc(VEH[r.tipo] || r.tipo)},
+    {k: "operador", t: "Operador", f: r => esc(r.operador.replace("Operador ", ""))},
+    {k: "t_salida", t: "Salida → vuelta", n: 1, f: r => `${r.salida} → ${r.vuelta}`},
+    {k: "n_paradas", t: "Paradas", n: 1},
+    {k: "km", t: "km", n: 1, f: r => num(r.km)},
+    {k: "horas_trabajo", t: "Horas", n: 1, f: r => num(r.horas_trabajo, 1)},
+    {k: "kg", t: "kg", n: 1, f: r => num(r.kg)},
+    {k: "ocupacion_cajas", t: "Ocup.", n: 1, title: "Ocupación en cajas", f: r => pctf(r.ocupacion_cajas)},
+    {k: "coste_eur", t: "Coste", n: 1, f: r => `<b>${eur2(r.coste_eur)}</b>`},
+    {k: "ekm", t: "€/km", n: 1, v: r => r.km ? r.coste_eur / r.km : 0, f: r => r.km ? eur2(r.coste_eur / r.km) : "–"},
+    {k: "ekg", t: "€/kg", n: 1, v: r => r.kg ? r.coste_eur / r.kg : 0, f: r => r.kg ? eur2(r.coste_eur / r.kg, 3) : "–"},
+    {k: "co2_kg", t: "CO₂ kg", n: 1, f: r => num(r.co2_kg)},
+    {k: "_", t: "Desglose del coste", f: r => barra(COMP.map(([k, t, col]) => [dz(r, k), col, t]), max)},
+  ];
+  const pie = `<td>Total (${fs.length})</td><td></td><td></td><td></td><td></td><td></td><td class="n">${sum(fs, r => r.n_paradas)}</td><td class="n">${num(km)}</td>` +
+    `<td class="n">${num(sum(fs, r => r.horas_trabajo))}</td><td class="n">${num(kg)}</td><td></td><td class="n">${eur(c)}</td><td class="n">${km ? eur2(c / km) : ""}</td>` +
+    `<td class="n">${kg ? eur2(c / kg, 3) : ""}</td><td class="n">${num(sum(fs, r => r.co2_kg))}</td><td></td>`;
+  pintarTabla("tabla-rutas", cols, fs, {pie, redraw: pintarRutasA, orden: {k: "coste_eur", dir: -1}, onRow: r => irAMapa(r.nombre)});
+}
+
+// ---------- pestaña: almacenes ----------
+let FA = "";
+function pintarAlmacenes() {
+  document.getElementById("ctrl-almacenes").innerHTML =
+    `<span><label>Planta </label><select id="a-planta">${opcionesSel(PLAN.plantas.map(p => [p.id, p.nombre]), FA, "Todas")}</select></span>` + leyenda_(ESCC) +
+    `<span class="m">€/kg según el método elegido en “Coste por tienda”.</span>`;
+  document.getElementById("a-planta").onchange = e => { FA = e.target.value; pintarAlmacenes(); };
+  const fs = Object.values(CALC.alm).filter(a => (a.kgRecibido || a.kgRep) && (!FA || a.planta === FA));
+  const max = Math.max(0, ...fs.map(a => a.total));
+  const cols = [
+    {k: "nombre", t: "Almacén", f: a => `${esc(a.nombre)} <span class="m">${esc(a.id)}</span>`},
+    {k: "planta", t: "Planta", f: a => esc(corto(a.planta))},
+    {k: "nTiendas", t: "Tiendas", n: 1},
+    {k: "kg", t: "kg/sem", n: 1, f: a => num(a.kgRep || a.kg)},
+    {k: "uso", t: "Uso capacidad", n: 1, f: a => a.capacidad ? `${pctf(a.uso)} <span class="m">de ${num(a.capacidad)}</span>` : "–"},
+    {k: "nTro", t: "Rutas troncal", n: 1, v: a => a.rutasTro.size, f: a => `${a.rutasTro.size} <span class="m">${esc([...a.rutasTro].join(", "))}</span>`},
+    {k: "nRep", t: "Rutas reparto", n: 1, v: a => a.rutasRep.length, f: a => a.rutasRep.length},
+    {k: "kmRep", t: "km reparto", n: 1, f: a => num(a.kmRep)},
+    {k: "cTro", t: "Coste troncal", n: 1, f: a => eur2(a.cTro)},
+    {k: "cRep", t: "Coste reparto", n: 1, f: a => eur2(a.cRep)},
+    {k: "total", t: "Total", n: 1, f: a => `<b>${eur2(a.total)}</b>`},
+    {k: "eurKgTro", t: "€/kg troncal", n: 1, f: a => eur2(a.eurKgTro, 3)},
+    {k: "eurKgRep", t: "€/kg reparto", n: 1, f: a => eur2(a.eurKgRep, 3)},
+    {k: "eurKg", t: "€/kg total", n: 1, f: a => `<b>${eur2(a.eurKg, 3)}</b>`},
+    {k: "_", t: "Troncal · Reparto", f: a => barra([[a.cTro, "var(--s1)", "Troncal"], [a.cRep, "var(--s2)", "Reparto"]], max)},
+  ];
+  const kg = sum(fs, a => a.kgRep), ct = sum(fs, a => a.cTro), cr = sum(fs, a => a.cRep);
+  const pie = `<td>Total (${fs.length})</td><td></td><td class="n">${sum(fs, a => a.nTiendas)}</td><td class="n">${num(kg)}</td><td></td>` +
+    `<td class="n">${new Set(fs.flatMap(a => [...a.rutasTro])).size}</td><td class="n">${sum(fs, a => a.rutasRep.length)}</td><td class="n">${num(sum(fs, a => a.kmRep))}</td>` +
+    `<td class="n">${eur(ct)}</td><td class="n">${eur(cr)}</td><td class="n">${eur(ct + cr)}</td><td></td><td></td><td class="n">${kg ? eur2((ct + cr) / kg, 3) : ""}</td><td></td>`;
+  pintarTabla("tabla-almacenes", cols, fs, {pie, redraw: pintarAlmacenes, orden: {k: "eurKg", dir: -1},
+    onRow: a => { mostrarTab("tiendas"); FT.planta = ""; FT.almacen = a.id; FT.q = ""; pintarCtrlTiendas(); pintarTiendas(); }});
+}
+
+// ---------- pestaña: resumen ----------
+function agrupar(xs, clave) {
+  const g = {};
+  for (const r of xs) {
+    const k = clave(r), o = g[k] || (g[k] = {k, rutas: 0, km: 0, kg: 0, coste: 0, ocup: 0, horas: 0, co2: 0, rs: []});
+    o.rutas++; o.km += r.km; o.kg += r.kg; o.coste += r.coste_eur; o.ocup += r.ocupacion_cajas; o.horas += r.horas_trabajo; o.co2 += r.co2_kg; o.rs.push(r);
+  }
+  return Object.values(g);
+}
+function camionesDe(filtro) { return sum((PLAN.flota || []).filter(filtro), f => f.camiones); }
+function pintarResumen() {
+  const cT = sum(tro, r => r.coste_eur), cR = sum(rep, r => r.coste_eur), c = cT + cR;
+  const kgT = sum(CALC.tiendas, t => t.kg), km = sum(rutas, r => r.km);
+  document.getElementById("tiles-resumen").innerHTML = [
+    ["Coste total semana", eur(c), `${num(rutas.length)} rutas · ${R.camiones} camiones`],
+    ["Troncal (planta → almacén)", eur(cT), `${pctf(cT / c)} del total · ${tro.length} rutas`],
+    ["Reparto (almacén → tienda)", eur(cR), `${pctf(cR / c)} del total · ${rep.length} rutas`],
+    ["€ por kg entregado", kgT ? eur2(c / kgT, 3) : "–", `${num(kgT)} kg a tiendas`],
+    ["€ por km", km ? eur2(c / km) : "–", `${num(km)} km`],
+    ["Coste medio por tienda", CALC.tiendas.length ? eur(c / CALC.tiendas.length) : "–", `${CALC.tiendas.length} tiendas servidas`],
+  ].map(([k, v, d]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="d">${esc(d)}</div></div>`).join("");
+
+  const cards = [];
+  // 1. componentes de tarifa por escalón
+  const comp = [["troncal", tro], ["reparto", rep], ["total", rutas]].map(([k, xs]) => {
+    const o = {k, total: sum(xs, r => r.coste_eur)}; for (const [ck] of COMP) o[ck] = sum(xs, r => (r.desglose_coste || {})[ck]); return o; });
+  const maxC = Math.max(...comp.map(o => o.total));
+  cards.push(["Coste por componente de la tarifa", leyenda_(COMP), "res-comp", [
+    {k: "k", t: "Escalón", f: o => o.k === "total" ? "<b>Total</b>" : (o.k === "troncal" ? "Troncal" : "Reparto")},
+    ...COMP.map(([ck, t]) => ({k: ck, t, n: 1, f: o => `${eur(o[ck])} <span class="m">${o.total ? pctf(o[ck] / o.total) : ""}</span>`})),
+    {k: "total", t: "Total", n: 1, f: o => `<b>${eur(o.total)}</b>`},
+    {k: "_", t: "", f: o => barra(COMP.map(([ck, t, col]) => [o[ck], col, t]), maxC)},
+  ], comp, null]);
+  // 2. por tipo de vehículo
+  const ordenVeh = Object.keys(VEH);
+  const veh = agrupar(rutas, r => r.escalon + "|" + r.tipo).map(o => { const [e, t] = o.k.split("|");
+    return {...o, escalon: e, tipo: t, camiones: camionesDe(f => f.escalon === e && f.tipo === t)}; })
+    .sort((a, b) => a.escalon.localeCompare(b.escalon) || ordenVeh.indexOf(a.tipo) - ordenVeh.indexOf(b.tipo));
+  const colsGrupo = (primera) => [primera,
+    {k: "rutas", t: "Rutas", n: 1}, {k: "km", t: "km", n: 1, f: o => num(o.km)}, {k: "kg", t: "kg", n: 1, f: o => num(o.kg)},
+    {k: "ocupm", t: "Ocup. media", n: 1, v: o => o.ocup / o.rutas, f: o => pctf(o.ocup / o.rutas)},
+    {k: "coste", t: "Coste", n: 1, f: o => `<b>${eur(o.coste)}</b>`},
+    {k: "ekm", t: "€/km", n: 1, v: o => o.km ? o.coste / o.km : 0, f: o => o.km ? eur2(o.coste / o.km) : "–"},
+    {k: "ekg", t: "€/kg", n: 1, v: o => o.kg ? o.coste / o.kg : 0, f: o => o.kg ? eur2(o.coste / o.kg, 3) : "–"}];
+  cards.push(["Por tipo de vehículo", "", "res-veh", [
+    {k: "tipo", t: "Vehículo", v: o => o.escalon + ordenVeh.indexOf(o.tipo), f: o => `${esc(VEH[o.tipo] || o.tipo)} <span class="m">${o.escalon}</span>`},
+    ...colsGrupo({k: "camiones", t: "Camiones", n: 1, title: "Camiones físicos estimados (solapamiento de rutas)"})], veh, null]);
+  // 3. por operador
+  const ops = agrupar(rutas, r => r.escalon + "|" + r.operador).map(o => { const [e, op] = o.k.split("|"); return {...o, escalon: e, operador: op}; })
+    .sort((a, b) => a.escalon.localeCompare(b.escalon) || a.operador.localeCompare(b.operador));
+  cards.push(["Por operador", "", "res-op", [
+    {k: "operador", t: "Operador", v: o => o.escalon + o.operador, f: o => `${esc(o.operador)} <span class="m">${o.escalon}</span>`},
+    ...colsGrupo({k: "horas", t: "Horas", n: 1, f: o => num(o.horas)})], ops, null]);
+  // 4. por planta: cadena completa (troncal desde la planta + reparto de los almacenes que repone)
+  const pl = PLAN.plantas.map(p => {
+    const t = tro.filter(r => r.planta === p.id), rr = rep.filter(r => r.planta === p.id);
+    const ts = CALC.tiendas.filter(x => x.planta === p.id), kg = sum(ts, x => x.kg);
+    const cT = sum(t, r => r.coste_eur), cR = sum(rr, r => r.coste_eur);
+    return {id: p.id, nombre: p.nombre, almacenes: p.almacenes ?? new Set(rr.map(r => r.origen)).size, tiendas: ts.length, kg, uso: p.capacidad ? p.kg / p.capacidad : 0,
+      cT, cR, total: cT + cR, eurKg: kg ? (cT + cR) / kg : 0, kmT: sum(t, r => r.km)};
+  }).filter(p => p.total > 0);
+  const maxP = Math.max(0, ...pl.map(p => p.total));
+  cards.push(["Por planta (troncal + reparto de sus almacenes)", leyenda_(ESCC), "res-pl", [
+    {k: "nombre", t: "Planta", f: p => `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${COL_PLANTA[p.id] || "#111"};margin-right:5px"></span><span title="${esc(p.nombre)}">${esc(p.nombre.replace(/^Planta /, "").replace(/\s*\(.*\)$/, ""))}</span>`},
+    {k: "almacenes", t: "Alm.", n: 1, title: "Almacenes que repone"}, {k: "tiendas", t: "Tiendas", n: 1},
+    {k: "kg", t: "kg/sem", n: 1, f: p => num(p.kg)}, {k: "uso", t: "Uso cap.", n: 1, f: p => pctf(p.uso)},
+    {k: "cT", t: "Troncal", n: 1, f: p => eur(p.cT)}, {k: "cR", t: "Reparto", n: 1, f: p => eur(p.cR)},
+    {k: "total", t: "Total", n: 1, f: p => `<b>${eur(p.total)}</b>`}, {k: "eurKg", t: "€/kg", n: 1, f: p => eur2(p.eurKg, 3)},
+    {k: "_", t: "", f: p => barra([[p.cT, "var(--s1)", "Troncal"], [p.cR, "var(--s2)", "Reparto"]], maxP)}], pl, null]);
+  // 5. flota
+  const flota = (PLAN.flota || []).map(f => ({...f, coste: sum(rutas.filter(r => r.origen === f.origen && r.tarifa === f.tarifa), r => r.coste_eur)}));
+  cards.push(["Flota por depósito y tarifa", `<span class="m">${sum(flota, f => f.camiones)} camiones · ${sum(flota, f => f.rutas)} rutas</span>`, "res-flota", [
+    {k: "origen", t: "Depósito", v: f => (f.escalon === "troncal" ? "0" : "1") + nombreLugar(f.origen), f: f => `${esc(nombreLugar(f.origen))} <span class="m">${f.escalon}</span>`},
+    {k: "tipo", t: "Vehículo", f: f => esc(VEH[f.tipo] || f.tipo)}, {k: "tarifa", t: "Tarifa"},
+    {k: "rutas", t: "Rutas", n: 1}, {k: "camiones", t: "Camiones", n: 1}, {k: "coste", t: "Coste", n: 1, f: f => eur(f.coste)}], flota, {k: "origen", dir: 1}]);
+
+  document.getElementById("cards-resumen").innerHTML = cards.map(([t, extra, id]) =>
+    `<div class="card"${id === "res-flota" ? ` style="grid-column:1/-1"` : ""}><h3><span>${t}</span>${extra}</h3><div class="tabla-wrap" id="${id}"${id === "res-flota" ? ` style="max-height:420px"` : ""}></div></div>`).join("") +
+    ((PLAN.avisos || []).length ? `<div class="card" style="grid-column:1/-1"><h3>Fuera del cálculo</h3><ul class="nota" style="margin:0">${PLAN.avisos.map(a => `<li>${esc(a.nombre)} (${num(a.kg)} kg): ${esc(a.motivo)}</li>`).join("")}</ul></div>` : "");
+  // reordenar re-pinta sólo esa tabla
+  for (const [, , id, cols, filas, orden] of cards) { const re = () => pintarTabla(id, cols, filas, {orden, redraw: re}); re(); }
+}
+
+// ---------- navegación entre pestañas ----------
+function mostrarTab(id) {
+  document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === id));
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === "tab-" + id));
+  if (id === "mapa") setTimeout(() => map.invalidateSize(), 0);
+  try { history.replaceState(null, "", "#" + id); } catch (e) {}
+}
+document.getElementById("tabs").onclick = e => { const b = e.target.closest("button"); if (b) mostrarTab(b.dataset.tab); };
+function pintarAnaliticas() { pintarCtrlTiendas(); pintarTiendas(); pintarCtrlRutas(); pintarRutasA(); pintarAlmacenes(); pintarResumen(); }
+pintarAnaliticas();
+const inicial = location.hash.slice(1);
+if (inicial && document.getElementById("tab-" + inicial)) mostrarTab(inicial);
 </script>
 </body>
 </html>
