@@ -179,6 +179,30 @@ def simular_ruta(d: Datos, planta: str, ruta: dict) -> dict:
     }
 
 
+def simular_con_reajuste(d: Datos, deposito: str, ruta: dict) -> dict:
+    """Simula la ruta y, si alguna entrega llega fuera de ventana, prueba a salir antes.
+
+    El solver planifica con pausas y descansos aproximados; con las reglas exactas una ruta larga puede llegar
+    tarde a la última parada. Se prueban como salida la apertura del depósito de cada día anterior (y la del
+    mismo día) y se elige la que entrega más kg a tiempo y, a igualdad, cuesta menos.
+    """
+    base = simular_ruta(d, deposito, ruta)
+    if not base["kg_tarde"]:
+        return base
+    ini, _ = d.horario_deposito(deposito)
+    mejor = base
+    for dd in range(int(ruta["salida"] // 1440) + 1):
+        t0 = dd * 1440 + ini
+        if t0 >= ruta["salida"]:
+            continue
+        cand = simular_ruta(d, deposito, {**ruta, "salida": t0})
+        if (cand["kg_tarde"], cand["coste_eur"]) < (mejor["kg_tarde"], mejor["coste_eur"]):
+            mejor = cand
+    if mejor is not base:
+        mejor["avisos"] = mejor["avisos"] + [f"Salida adelantada a {mejor['salida']} para llegar a tiempo (el solver proponía {base['salida']})"]
+    return mejor
+
+
 def flota_necesaria(rutas: list[dict]) -> list[dict]:
     """Camiones físicos = máximo de rutas solapadas en el tiempo por (depósito, tarifa).
     Un mismo camión puede hacer una ruta el lunes y otra el martes."""

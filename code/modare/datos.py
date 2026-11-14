@@ -200,7 +200,8 @@ def construir_visitas(d: Datos, pedidos_kg: dict[str, float]) -> tuple[list[Visi
 
     nº visitas = max(frecuencia del segmento, cajas / máx. cajas por entrega), y los días
     de la semana se reparten en bloques consecutivos para que no caigan el mismo día.
-    Devuelve (visitas, avisos) — los avisos incluyen tiendas sin acceso por carretera.
+    Devuelve (visitas, avisos) — los avisos son pedidos que superan lo que la tienda puede recibir y tiendas
+    sin acceso por carretera.
     """
     P, horizonte = d.P, int(d.P["horizonte_planificacion_dias"])
     cajas_por_palet = P["kg_por_palet"] / C.KG_POR_CAJA
@@ -210,7 +211,7 @@ def construir_visitas(d: Datos, pedidos_kg: dict[str, float]) -> tuple[list[Visi
         if kg <= 0 or tid not in tiendas.index:
             continue
         t = tiendas.loc[tid]
-        if t.acceso_carretera != 1:
+        if t.get("acceso_carretera", 1) != 1:   # islas dadas de alta en la app de gestión
             avisos.append({"tienda": tid, "nombre": t.nombre, "kg": kg,
                            "motivo": "Sin acceso por carretera (islas): requiere transporte marítimo, fuera del VRP"})
             continue
@@ -239,35 +240,40 @@ def construir_visitas(d: Datos, pedidos_kg: dict[str, float]) -> tuple[list[Visi
     return visitas, avisos
 
 
-def construir_visitas_troncal(d: Datos, visitas_tienda: list[Visita], almacen_planta: dict[str, str]) -> list[Visita]:
-    """Escalón troncal: una reposición por almacén con los kg que reparte esa semana.
+def construir_visitas_troncal(d: Datos, visitas_tienda: list[Visita],
+                              flujos: dict[str, dict[str, float]]) -> list[Visita]:
+    """Escalón troncal: una reposición por (almacén, planta) con flujo, con los kg que esa planta le envía.
 
-    Si no cabe en el camión troncal más grande (en cajas o kg) o la frecuencia lo pide, se divide
-    en varias entregas en bloques de días distintos. El almacén recibe en su horario (L-V).
+    Un almacén puede recibir de varias plantas (flujos = {almacén: {planta: kg}}); cada pareja es una visita
+    independiente en el VRP troncal de su planta. Si no cabe en el camión troncal más grande (en cajas o kg)
+    o la frecuencia lo pide, se divide en varias entregas en bloques de días distintos (L-V del almacén).
     """
     P, horizonte = d.P, int(d.P["horizonte_planificacion_dias"])
     tipos_t = [t for t in str(P["tipos_troncal"]).split(";") if t]
     tt = d.tipos.set_index("id_tipo").loc[tipos_t]
     max_cajas = int(min(tt.cap_cajas.max(), (tt.carga_util_kg / C.KG_POR_CAJA).max()))
     vmax = max(tipos_t, key=C.ORDEN_TIPOS.index)
-    kg_alm, cajas_alm = {}, {}
+    cajas_alm = {}
     for v in visitas_tienda:
-        kg_alm[v.deposito] = kg_alm.get(v.deposito, 0) + v.kg
         cajas_alm[v.deposito] = cajas_alm.get(v.deposito, 0) + v.cajas
     alm = d.almacenes.set_index("id_almacen")
     out = []
-    for a, kg in kg_alm.items():
+    for a, por_planta in flujos.items():
         r = alm.loc[a]
-        cajas = cajas_alm[a]
+        kg_a = sum(por_planta.values())
         dias_ok = dias_desde_rango(r.dias_recepcion, horizonte)
-        n = min(len(dias_ok), max(round(P["entregas_semana_almacen"]), math.ceil(cajas / max_cajas)))
-        bloques = [dias_ok[i * len(dias_ok) // n:(i + 1) * len(dias_ok) // n] for i in range(n)]
-        reparto = [cajas // n + (1 if i < cajas % n else 0) for i in range(n)]
-        for i, (bl, cj) in enumerate(zip(bloques, reparto)):
-            out.append(Visita(
-                id=f"{a}#{i + 1}", tienda=a, kg=round(kg * cj / cajas, 1), cajas=cj, dias=bl,
-                ini=hhmm_a_min(r.hora_inicio_carga), fin=hhmm_a_min(r.hora_fin_carga),
-                descarga=int(r.tiempo_descarga_min), vehiculo_max=vmax,
-                planta=almacen_planta[a], deposito=almacen_planta[a],
-            ))
+        varias = len(por_planta) > 1
+        for p, kg in por_planta.items():
+            cajas = max(1, round(cajas_alm[a] * kg / kg_a))
+            n = min(len(dias_ok), max(round(P["entregas_semana_almacen"]), math.ceil(cajas / max_cajas)))
+            bloques = [dias_ok[i * len(dias_ok) // n:(i + 1) * len(dias_ok) // n] for i in range(n)]
+            reparto = [cajas // n + (1 if i < cajas % n else 0) for i in range(n)]
+            pref = f"{a}<{p.replace('PL-', '')}" if varias else a   # id único aunque haya varias plantas
+            for i, (bl, cj) in enumerate(zip(bloques, reparto)):
+                out.append(Visita(
+                    id=f"{pref}#{i + 1}", tienda=a, kg=round(kg * cj / cajas, 1), cajas=cj, dias=bl,
+                    ini=hhmm_a_min(r.hora_inicio_carga), fin=hhmm_a_min(r.hora_fin_carga),
+                    descarga=int(r.tiempo_descarga_min), vehiculo_max=vmax,
+                    planta=p, deposito=p,
+                ))
     return out

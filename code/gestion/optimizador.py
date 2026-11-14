@@ -183,6 +183,7 @@ def importar_plan(semana: str) -> str:
     db.session.flush()
 
     viajes, tienda_viaje, almacen_viaje = [], {}, {}
+    troncal_de = {}     # (almacén, planta de origen) -> viaje: un almacén puede recibir de varias plantas
     for r in plan["rutas"]:
         origen = r.get("origen", r["planta"])
         v = Viaje(semana=semana, nombre=r["nombre"], escalon=r.get("escalon", "reparto"), origen=origen,
@@ -195,6 +196,8 @@ def importar_plan(semana: str) -> str:
         destino = tienda_viaje if v.escalon == "reparto" else almacen_viaje
         for p in r["paradas"]:
             destino.setdefault(p["tienda"], (v, origen))
+            if v.escalon == "troncal":
+                troncal_de.setdefault((p["tienda"], origen), v)
 
     ocupados = defaultdict(list)
     sin_camion = _asignar_camiones(viajes, ocupados)
@@ -229,7 +232,8 @@ def importar_plan(semana: str) -> str:
             continue
         alm = db.session.get(Almacen, a_id)
         alm.planta_id = planta
-        v = almacen_viaje.get(a_id, (None, None))[0]
+        # la reposición se registra a nombre de la planta principal del almacén (la que más kg le envía)
+        v = troncal_de.get((a_id, planta)) or almacen_viaje.get(a_id, (None, None))[0]
         kg = round(kg_alm[a_id], 1)
         db.session.add(Reposicion(semana=semana, planta_id=planta, almacen_id=a_id, viaje=v, kg=kg,
                                   cajas=cajas_alm[a_id],

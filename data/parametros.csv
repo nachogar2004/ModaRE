@@ -39,3 +39,12 @@ tiempo_descarga_almacen_min,45,min,SINTÉTICO,,Tiempo de descarga de un camión 
 holgura_capacidad_almacen,1.5,,SINTÉTICO,Supuesto del prototipo (almacenes inventados),Solo para generar_almacenes.py: capacidad = holgura × demanda media semanal de las tiendas de la provincia
 capacidad_min_almacen_kg,1500,kg/semana,SINTÉTICO,Supuesto del prototipo (almacenes inventados),Solo para generar_almacenes.py: capacidad mínima de un almacén
 dias_max_ruta_reparto,1,días,SINTÉTICO,Revisión del cronograma (14/11/2026): rutas de reparto urbanas que dormían a pocos km del almacén,Días máximos de una ruta de reparto almacén → tiendas (1 = el conductor vuelve cada día). dias_max_ruta sigue aplicando al troncal
+m2_base_almacen,150,m²,SINTÉTICO,Supuesto del prototipo,"Superficie mínima de un almacén (muelle, zona de preparación, oficina) aunque mueva poca ropa"
+m2_por_palet_almacen,2,m²/palé,ESTIMADO,"Orden de magnitud de almacenaje en suelo con pasillos (1 palé europeo = 0,96 m² + pasillo)",Superficie por palé de stock; stock = capacidad semanal del almacén (trabaja con 1 semana de stock)
+gastos_m2_mes_almacen,1,€/m²/mes,SINTÉTICO,Supuesto del prototipo,"Suministros, seguro, mantenimiento e IBI repercutido, por m² y mes, encima del alquiler"
+coste_gestion_almacen_eur_semana,100,€/semana,SINTÉTICO,Supuesto del prototipo,"Coste fijo de tener el almacén abierto aparte del local: sistemas, limpieza, coordinación (parte de una persona)"
+coste_hora_operario_eur,21,€/h,ESTIMADO,Orden de magnitud del coste empresa de un mozo de almacén en España (salario + Seguridad Social),Para el coste de manipulación
+productividad_kg_hora_almacen,350,kg/h,SINTÉTICO,"Supuesto del prototipo: ~28 cajas/h entre descargar del troncal, ubicar, preparar y cargar el reparto",kg que un operario manipula por hora en el cross-dock (entrada + salida)
+factor_coste_reparto,0.95,,ESTIMADO,Calibrado con el plan 2026-W47 (coste real de las rutas ÷ estimación),"Asignación: coste estimado de servir una tienda desde un almacén = factor × nº entregas × ida y vuelta (km × €/km + h × €/h del camión de 7,5 t)"
+factor_coste_troncal,3.2,,ESTIMADO,Calibrado con el plan 2026-W47 (coste real de las rutas ÷ estimación),Asignación: coste estimado de llevar 1 kg de planta a almacén = factor × ida y vuelta del camión de 12 t ÷ su carga
+max_min_almacen_tienda,180,min,SINTÉTICO,"Supuesto del prototipo: el reparto es de 1 día, ida y vuelta de 3 h + descargas cabe en la jornada","Tiempo máximo en camión entre una tienda y el almacén que la sirve (al cerrar almacenes, la tienda pasa a otro)"

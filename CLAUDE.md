@@ -31,12 +31,12 @@ Todos los CSV llevan columnas `etiqueta` (REAL / ESTIMADO / SINTÉTICO) y `fuent
 | Fichero | Qué tiene | Notas |
 |---|---|---|
 | `plantas.csv` | 6 plantas (4 activas: MAD, VAL, BCN, BIO; AST y SCQ futuras) | `capacidad_salida_kg_semana`, horario de carga 06–18 h |
-| `almacenes.csv` | 38 almacenes, uno por provincia peninsular con tiendas | **todo SINTÉTICO**: ubicación = **polígono industrial principal** de la provincia (elegido por el equipo en `code/modare/poligonos.py`, coordenadas de OpenStreetMap/Nominatim cacheadas en `poligonos_geocodificados.json`; Zamora fijado a mano, Palencia en el polígono San Blas de Villalobón, junto a la capital), capacidad = 1,5 × demanda media (mín. 1.500 kg/semana), horario 06–20 h L-V. Se genera con `code/generar_almacenes.py`; se puede editar a mano |
-| `tiendas.csv` | 182 tiendas | ventas €/año, tamaño, ventana de recepción, `vehiculo_max`, `acceso_carretera` (7 de Baleares = 0), `en_muestra` (53 para pruebas) |
+| `almacenes.csv` | 38 almacenes, uno por provincia peninsular con tiendas | **todo SINTÉTICO**: ubicación = **polígono industrial principal** de la provincia (elegido por el equipo en `code/modare/poligonos.py`, coordenadas de OpenStreetMap/Nominatim cacheadas en `poligonos_geocodificados.json`; Zamora fijado a mano, Palencia en el polígono San Blas de Villalobón, junto a la capital), capacidad = 1,5 × demanda media (mín. 1.500 kg/semana), horario 06–20 h L-V, **costes**: `coste_fijo_eur_semana` (superficie según capacidad × alquiler €/m² de la provincia + gastos + gestión: 231–578 €/semana) y `coste_manipulacion_eur_kg` (€/h operario ÷ kg/h: 0,055–0,066 €/kg). Se genera con `code/generar_almacenes.py`; se puede editar a mano |
+| `tiendas.csv` | 175 tiendas peninsulares (las 7 de Baleares se eliminaron: el trabajo no incluye islas) | ventas €/año, tamaño, ventana de recepción, `vehiculo_max`, `en_muestra` (53 para pruebas) |
 | `vehiculos.csv` | 5 tipos: FUR 3,5 t, R75, R12, R18, ART 40 t | carga útil kg, volumen m³, palés |
 | `emisiones.csv` | kgCO₂e/km vacío y lleno por tipo (DEFRA 2025) | de aquí sale el **consumo propio** de cada camión |
 | `tarifas.csv` | Operador A (€/km + €/h, ilimitado) y B (€/día + €/km, unidades limitadas) | |
-| `distancias.csv` | matriz completa **por carretera (OSRM)** entre plantas, almacenes y tiendas: km, min de coche y min de camión (×`factor_tiempo_camion`) | 219 puntos, 47.742 pares, islas no incluidas. Se regenera con `code/calcular_distancias.py` (~30 s); hay que repetirlo si se mueven/añaden almacenes, plantas o tiendas. Si a un par le falta dato se usa línea recta × `factor_rodeo` |
+| `distancias.csv` | matriz completa **por carretera (OSRM)** entre plantas, almacenes y tiendas: km, min de coche y min de camión (×`factor_tiempo_camion`) | 219 puntos, 47.742 pares. Se regenera con `code/calcular_distancias.py` (~30 s); hay que repetirlo si se mueven/añaden almacenes, plantas o tiendas. Si a un par le falta dato se usa línea recta × `factor_rodeo` |
 | `geometrias_osrm.json` | caché de trazados por carretera de cada tramo (polyline) para el mapa | se rellena sola al guardar un plan |
 | `vetos_almacen_planta.csv`, `vetos_tienda_almacen.csv` | vetos (`id_almacen,id_planta` / `id_tienda,id_almacen`): de dónde NO quiere recibir cada almacén / tienda; los escribe la app al optimizar | opcionales: sin fichero no hay vetos. Todo almacén puede recibir de cualquier planta y toda tienda de cualquier almacén |
 | `parametros.csv` | todos los supuestos de negocio (kg/palé, frecuencias, jornada, días máx. de ruta, `tipos_troncal`…) | **cambiad aquí los supuestos, no en el código** |
@@ -48,17 +48,30 @@ Demanda por defecto (si la tienda no pide): `kg_semana = ventas / precio_medio_e
 
 Descomposición *cluster-first, route-second* en dos escalones, todo con OR-Tools:
 
-### Etapa 1 · Asignación tienda → almacén → planta (`code/modare/asignacion.py`, CP-SAT)
+### Etapa 1 · Qué almacenes abrir y asignación tienda → almacén → planta (`code/modare/asignacion.py`, CP-SAT)
 ```
-min  Σ c_rep · km(a,s) · kg_s · x[s,a]  +  Σ c_tro · km(p,a) · f[a,p]
-s.a. Σ_a x[s,a] = 1                        cada tienda la sirve un almacén (de sus 5 más cercanos)
+min  Σ fijo_a·z[a] + Σ manip_a·kg_s·x[s,a] + Σ R(s,a)·x[s,a] + Σ T(p,a)·f[a,p]
+s.a. Σ_a x[s,a] = 1                        cada tienda la sirve un almacén abierto (x ≤ z) a ≤ 3 h (`max_min_almacen_tienda`)
+     z[a] = 1 ∀a  y  Σ_s x[s,a] ≥ 1         (por defecto) los 38 abiertos y cada uno sirve ≥1 tienda si su provincia tiene demanda
      Σ_s kg_s · x[s,a] ≤ capacidad_a        capacidad semanal del almacén
-     Σ_p y[a,p] ≤ 1                         cada almacén lo repone una sola planta (no vetada: vetos_almacen_planta.csv)
+     Σ_p f[a,p] = Σ_s kg_s · x[s,a]         conservación del flujo (f[a,p] = kg que la planta p envía al almacén a)
+     f[a,p] solo existe si el almacén no ha vetado la planta (vetos_almacen_planta.csv)
      x[s,a] = 0 si la tienda veta el almacén (vetos_tienda_almacen.csv); tiendas que vetan todos -> aviso, sin servir
-     Σ_p f[a,p] = Σ_s kg_s · x[s,a]         conservación del flujo;  f[a,p] ≤ cap_a · y[a,p]
      Σ_a f[a,p] ≤ capacidad_p               capacidad de salida semanal de la planta (solo activas)
 ```
-`c_rep`, `c_tro` = €/(kg·km) del operador A con el vehículo típico de cada escalón (7,5 t / tráiler).
+**Cualquier almacén puede recibir de cualquier planta, y de varias a la vez** (no hay abastecimiento único): el
+modelo solo divide si le sale más barato, p.ej. si la planta más cercana se queda sin capacidad. Con las capacidades
+actuales no divide ninguno; con plantas al 75 % divide Cádiz (MAD + 1 kg de VAL) y Zaragoza (BCN + 83 kg de BIO).
+Cada pareja (almacén, planta) con flujo es una reposición troncal propia (`AL-ZARAGOZA<BIO#1`). En la interfaz cada
+almacén tiene una `planta` principal (la que más kg envía, para filtros y colores) y el reparto completo en `plantas`.
+**Requisito: exactamente un almacén por provincia peninsular con tiendas (38), todos abiertos** (`--almacenes todos`,
+por defecto): se paga el fijo de los 38; una tienda puede ir al almacén de otra provincia si sale más barato, pero cada
+almacén reparte al menos a una tienda cuando su provincia tiene demanda esa semana (si sus tiendas pequeñas no reciben
+esa semana, queda abierto sin tiendas, p.ej. Cantabria y Palencia en W47). **Escenario `--almacenes optimo`**: el modelo
+decide cuáles abrir (en W47 abre 25 y cierra 13). Para comparar transporte con almacén, el transporte se estima en
+€ calibrados con las rutas reales: `R(s,a)` = `factor_coste_reparto` (0,95) × entregas × ida y vuelta en 7,5 t;
+`T(p,a)` = `factor_coste_troncal` (3,2) × ida y vuelta en 12 t ÷ carga, por kg. (La estimación kg×km anterior
+daba ~4 % del coste real: con costes de almacén habría cerrado casi todos.) Recalibrar si cambian mucho las rutas.
 `--asignacion actual`: cada tienda a su almacén provincial y cada almacén a la `planta_actual` mayoritaria de sus tiendas.
 
 ### Etapa 2 · VRP heterogéneo con ventanas horarias, uno por depósito (`code/modare/vrp.py`, routing solver)
@@ -134,7 +147,12 @@ code/
 - `rutas.csv`: una fila por ruta. Nombres `T-MAD-01` (troncal desde la planta de Madrid), `R-SEVILLA-02`
   (reparto desde el almacén de Sevilla); el id interno del solver va en `id_solver`.
 - `paradas.csv`: una fila por parada. `almacenes.csv`: uso de cada almacén. `plan.json`: todo lo anterior + KPIs.
-- Regenerar el mapa sin optimizar: `.venv\Scripts\python -m modare.visualizar 2026-W47`.
+- Regenerar el mapa sin optimizar: `.venv\Scripts\python -m modare.visualizar 2026-W47`. También reintenta los tramos que
+  no se pudieron dibujar. Los trazados vienen de la caché (`data/geometrias_osrm.json`, en git) o del servidor público
+  de OSRM; si no hay conexión se dibujan en línea recta (**el plan y los costes no cambian**: usan `distancias.csv`).
+  Como cada ordenador encuentra rutas algo distintas, los tramos nuevos se piden a OSRM. Si falla por certificados
+  (`CERTIFICATE_VERIFY_FAILED`, típico del Python de python.org en Mac): instalar `requirements.txt` (incluye certifi)
+  o ejecutar `Install Certificates.command`; en redes con inspección HTTPS, probar otra red o sin VPN.
 
 ### Cómo ejecutar (Windows, desde `code/`)
 ```
@@ -155,6 +173,15 @@ En consola de Windows usad `PYTHONIOENCODING=utf8` si salen caracteres raros.
 ### Resultados de referencia (semana 2026-W47, 30 s/planta, 20 CPU)
 Dos escalones (modelo actual):
 
+| Escenario (W47, con coste de almacenes) | Almacenes | Rutas | Camiones | km | Transporte | Almacenes | **Total** | €/kg |
+|---|---|---|---|---|---|---|---|---|
+| **Requisito: 38 abiertos** (`--almacenes todos`) | 38 (36 con tiendas) | 67 (10 + 57) | 50 | 11.938 | 15.541 € | 13.088 € | **28.630 €** | 0,90 |
+| Escenario: el modelo elige (`--almacenes optimo`) | 25 | 60 (10 + 50) | 41 | 12.279 | 14.974 € | 9.543 € | 24.517 € | 0,77 |
+
+Exigir los 38 almacenes cuesta ≈ 4.100 €/semana más que dejar que el modelo cierre 13 (sobre todo por sus costes fijos).
+
+Histórico (solo transporte, antes de costear almacenes):
+
 | Escenario | Rutas (troncal + reparto) | Camiones | km | Coste (troncal + reparto) | CO₂ | Servicio |
 |---|---|---|---|---|---|---|
 | **Actual**: polígonos, carretera, reparto de 1 día y entregas de una tienda en rutas distintas | 67 (10 + 57) | 52 | 12.616 | 15.648 € (7.702 + 7.946) | 6,0 t | 100 % |
@@ -167,8 +194,8 @@ El troncal sale casi todo en rígidos de 12 t (un tráiler para Barcelona) y el 
 Con distancias reales los km apenas cambian, pero los tiempos son mayores (sobre todo en tramos urbanos),
 lo que encarece el coste por hora del operador A un ~13 %.
 La primera ejecución tarda ~1 min más porque pide a OSRM el trazado de cada ruta (luego queda en caché).
-**Ojo al comparar con el modelo directo anterior** (planta → tienda: 17.025 €, 19 camiones): el coste de dos
-escalones **no incluye operar los almacenes** (manipulación, alquiler, personal), que hoy vale 0; y los camiones
+**Ojo al comparar con el modelo directo antiguo** (planta → tienda: 17.025 €, 19 camiones): se calculó con distancias
+en línea recta y sin almacenes; para una comparación justa habría que recalcularlo con los datos actuales. Los camiones
 físicos del reparto se cuentan por almacén (cada almacén necesita al menos uno).
 
 ## App de gestión «ReMode Studio» (`code/gestion/`, BD `code/gestion.db`)
@@ -217,20 +244,24 @@ Pendiente: el plan troncal y el reparto se ejecutan la misma semana en la app (e
 ## Supuestos y limitaciones (decidlos/validadlos con la ONG)
 - **Almacenes inventados** (qué polígono, capacidad, horario): ver `almacenes.csv`, `modare/poligonos.py` y `generar_almacenes.py`.
   Tras cambiar un almacén: `generar_almacenes.py` → `calcular_distancias.py` → `optimizar.py`.
-- Coste de operar los almacenes no modelado (añadir €/kg manipulado o coste fijo por almacén abierto).
-- Todos los almacenes se consideran abiertos; no se decide cuáles abrir (sería un problema de localización).
+- **Costes de almacén inventados** (alquiler por provincia sin fuente verificada, gestión 100 €/semana, 21 €/h
+  operario, 350 kg/h). Un almacén cerrado cuesta 0 (se supone que se puede dejar de alquilar).
+- La capacidad de cada almacén es fija (1,5 × demanda de su provincia): al cerrar almacenes, los vecinos solo absorben
+  hasta su capacidad. Una variante sería elegir también el tamaño (más m² → más capacidad y más coste fijo).
+- Si una ruta llega tarde con las reglas exactas, se prueba a adelantar la salida (`simular_con_reajuste`).
 - Sincronización troncal/reparto por stock (la reposición de W sirve el reparto de W+1).
 - 1 caja = 12,5 kg (20 cajas/palé) — `config.KG_POR_CAJA`, SINTÉTICO.
 - `unidades_disponibles` del operador B se interpreta **por depósito (planta o almacén) y día**.
-- Las 7 tiendas de Baleares (`acceso_carretera = 0`) quedan fuera del VRP y se listan como aviso (transporte marítimo).
-- El usuario mencionó 192 tiendas; `tiendas.csv` tiene 182.
+- **Sin islas**: por indicación del reto se eliminaron las 7 tiendas de Baleares; no hay plantas ni almacenes en islas.
+- El usuario mencionó 192 tiendas; `tiendas.csv` tenía 182 (175 tras quitar Baleares).
 - La tarifa €/km ya incluye combustible; los litros y € de gasóleo se reportan solo como información.
 - Las rutas no se encadenan explícitamente por camión (multi-trip): la flota física se estima por solapamiento.
 - Vuelta al depósito en vacío: la logística inversa (`kg_retorno_por_kg_entregado`) no está modelada aún.
 - OSRM público usa el perfil de **coche**; el tiempo de camión = tiempo de coche × `factor_tiempo_camion` (1,2). No tiene en cuenta restricciones de camión (gálibo, peso, ZBE).
 
 ## Siguientes pasos posibles
-- Coste de almacén y decisión de qué almacenes abrir (localización de cross-docks).
+- Validar con la ONG los costes de almacén (o usar locales cedidos por entidades socias, mucho más baratos).
+- Elegir también el tamaño de cada almacén; recalcular el reparto directo con los datos actuales para comparar.
 - Ubicaciones reales de almacenes y sus distancias por OSRM.
 - Logística inversa (recogida de sacas/no vendido en la vuelta) como pickup-and-delivery.
 - Escenarios: abrir Asturias/Santiago (`--plantas-futuras`), subida de tarifas (`multiplicador_tarifas`), precio del CO₂.
