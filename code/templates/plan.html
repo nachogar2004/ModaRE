@@ -72,6 +72,19 @@
 
 <script>
 const PLAN = {{ plan|tojson }};
+function decodificar(s) {  // polyline de Google, precisión 5 -> [[lat, lon], ...]
+  const pts = []; let i = 0, lat = 0, lon = 0;
+  while (i < s.length) {
+    for (let eje = 0; eje < 2; eje++) {
+      let res = 0, shift = 0, b;
+      do { b = s.charCodeAt(i++) - 63; res |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      const v = res & 1 ? ~(res >> 1) : res >> 1;
+      if (eje === 0) lat += v; else lon += v;
+    }
+    pts.push([lat / 1e5, lon / 1e5]);
+  }
+  return pts;
+}
 const COL = ["#0f766e","#b45309","#7c3aed","#be123c","#1d4ed8","#4d7c0f","#c2410c","#0e7490","#a21caf","#475569"];
 const mapa = L.map("mapa").setView([40.2, -3.5], 6);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {attribution: "© OpenStreetMap"}).addTo(mapa);
@@ -80,7 +93,9 @@ PLAN.plantas.forEach(p => L.marker([p.lat, p.lon]).addTo(mapa).bindPopup(`<b>${p
 const capas = PLAN.rutas.map((r, i) => {
   const pl = plantas[r.origen || r.planta], c = COL[i % COL.length];
   const pts = [[pl.lat, pl.lon], ...r.paradas.map(p => [p.lat, p.lon]), [pl.lat, pl.lon]];
-  const g = L.layerGroup([L.polyline(pts, {color: c, weight: 3, opacity: .75})]);
+  // trazado por carretera (OSRM) por tramo; línea recta si falta
+  const linea = pts.slice(0, -1).map((a, k) => (r.geometria || [])[k] ? decodificar(r.geometria[k]) : [a, pts[k + 1]]);
+  const g = L.layerGroup([L.polyline(linea, {color: c, weight: 3, opacity: .75})]);
   r.paradas.forEach((p, k) => g.addLayer(L.circleMarker([p.lat, p.lon], {radius: 5, color: c, fillOpacity: .9})
     .bindPopup(`<b>${p.nombre}</b><br>${r.nombre || r.id} · parada ${k + 1}<br>${p.cajas} cajas · ${p.inicio_descarga}`)));
   return g.addTo(mapa);

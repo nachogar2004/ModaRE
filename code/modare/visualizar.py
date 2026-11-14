@@ -133,11 +133,15 @@ const capas = {};
 for (const r of rutas) {
   const o = lugares[r.origen];
   const tro = r.escalon === "troncal";
-  const pts = [[o.lat, o.lon], ...r.paradas.map(p => [p.lat, p.lon])];
-  const ida = L.polyline(pts, {color: r.color, weight: tro ? 5 : 3, opacity: .85});
-  const vuelta = L.polyline([pts[pts.length - 1], pts[0]], {color: r.color, weight: 2, opacity: .6, dashArray: "6 6"});
-  const flechas = [];
-  for (let i = 0; i < pts.length - 1; i++) flechas.push(flecha(pts[i], pts[i + 1], r.color));
+  const pts = [[o.lat, o.lon], ...r.paradas.map(p => [p.lat, p.lon]), [o.lat, o.lon]];
+  // un tramo por pareja de puntos consecutivos: trazado por carretera (OSRM) o, si falta, línea recta
+  const tramos = pts.slice(0, -1).map((a, i) => {
+    const g = (r.geometria || [])[i];
+    return g ? decodificar(g) : [a, pts[i + 1]];
+  });
+  const ida = L.polyline(tramos.slice(0, -1), {color: r.color, weight: tro ? 5 : 3, opacity: .85});
+  const vuelta = L.polyline(tramos[tramos.length - 1], {color: r.color, weight: 2, opacity: .6, dashArray: "6 6"});
+  const flechas = tramos.slice(0, -1).map(t => flecha(t, r.color));
   const nodos = r.paradas.map((p, k) => L.marker([p.lat, p.lon], {zIndexOffset: 2000,
       icon: L.divIcon({className: "", html: `<div class="num" style="border-color:${r.color}">${k + 1}</div>`, iconSize: [22, 22], iconAnchor: [11, 11]})
     }).bindPopup(popupParada(r, p, k)));
@@ -151,8 +155,8 @@ for (const r of rutas) {
 for (const a of PLAN.almacenes || []) {
   L.marker([a.lat, a.lon], {zIndexOffset: 500, icon: L.divIcon({className: "",
       html: `<div class="almacen-ico" style="border-color:${COL_PLANTA[a.planta] || "#111"}"></div>`, iconSize: [12, 12], iconAnchor: [6, 6]})})
-   .bindTooltip(esc(a.nombre))
-   .bindPopup(`<b>${esc(a.nombre)}</b> <span style="color:#6b7280">(${esc(a.id)})</span><br>Lo repone ${esc(a.planta)}<br>` +
+   .bindTooltip(esc(a.nombre) + (a.poligono ? " · " + esc(a.poligono) : ""))
+   .bindPopup(`<b>${esc(a.nombre)}</b> <span style="color:#6b7280">(${esc(a.id)})</span><br>${a.poligono ? esc(a.poligono) + (a.municipio ? " (" + esc(a.municipio) + ")" : "") + "<br>" : ""}Lo repone ${esc(a.planta)}<br>` +
               `${a.tiendas} tiendas · ${num(a.kg)} / ${num(a.capacidad)} kg/semana (${num(100 * a.kg / a.capacidad)} %)`)
    .addTo(map);
 }
@@ -165,13 +169,28 @@ for (const p of PLAN.plantas) {
 const leyenda = L.control({position: "bottomright"});
 leyenda.onAdd = () => { const d = L.DomUtil.create("div", "leyenda");
   d.innerHTML = `<span class="planta-ico" style="background:#333">■ planta</span> &nbsp;<span class="almacen-ico" style="display:inline-block;border-color:#333"></span> almacén &nbsp;○ tienda<br>` +
-    `<b>línea gruesa</b> = troncal (color de la planta) · fina = reparto · discontinua = vuelta<br>Clic en una ruta para ver el orden de paradas` +
+    `<b>línea gruesa</b> = troncal (color de la planta) · fina = reparto · discontinua = vuelta · trazado por carretera (OSRM)<br>Clic en una ruta para ver el orden de paradas` +
     ((PLAN.avisos || []).length ? `<br><span style="color:#b42318">${PLAN.avisos.length} tiendas fuera del VRP (islas)</span>` : "");
   return d; };
 leyenda.addTo(map);
 
-function flecha(a, b, color) {
-  const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+function decodificar(s) {  // polyline de Google, precisión 5 -> [[lat, lon], ...]
+  const pts = []; let i = 0, lat = 0, lon = 0;
+  while (i < s.length) {
+    for (let eje = 0; eje < 2; eje++) {
+      let res = 0, shift = 0, b;
+      do { b = s.charCodeAt(i++) - 63; res |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      const v = res & 1 ? ~(res >> 1) : res >> 1;
+      if (eje === 0) lat += v; else lon += v;
+    }
+    pts.push([lat / 1e5, lon / 1e5]);
+  }
+  return pts;
+}
+function flecha(tramo, color) {  // flecha a mitad del tramo, orientada en el sentido de la marcha
+  const k = Math.max(0, Math.floor((tramo.length - 1) / 2));
+  const a = tramo[k], b = tramo[Math.min(k + 1, tramo.length - 1)];
+  const m = tramo.length > 2 ? a : [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
   const ang = Math.atan2(b[0] - a[0], (b[1] - a[1]) * Math.cos(a[0] * Math.PI / 180)) * 180 / Math.PI;
   return L.marker(m, {interactive: false, icon: L.divIcon({className: "", iconSize: [14, 14], iconAnchor: [7, 7],
     html: `<svg width="14" height="14" viewBox="0 0 14 14" style="transform:rotate(${-ang}deg)"><path d="M2 2 L12 7 L2 12 Z" fill="${color}"/></svg>`})});
@@ -292,5 +311,8 @@ if __name__ == "__main__":
     plan = cargar_plan(semana)
     if plan is None:
         sys.exit(f"No hay plan para {semana} en {C.SALIDAS_DIR}")
+    if any(not r.get("geometria") for r in plan["rutas"]):
+        from .osrm import añadir_geometrias
+        añadir_geometrias(plan)
     guardar(plan)
     print(f"Escrito {C.SALIDAS_DIR / semana / 'mapa.html'}")

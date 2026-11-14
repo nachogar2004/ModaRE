@@ -31,12 +31,13 @@ Todos los CSV llevan columnas `etiqueta` (REAL / ESTIMADO / SINTÉTICO) y `fuent
 | Fichero | Qué tiene | Notas |
 |---|---|---|
 | `plantas.csv` | 6 plantas (4 activas: MAD, VAL, BCN, BIO; AST y SCQ futuras) | `capacidad_salida_kg_semana`, horario de carga 06–18 h |
-| `almacenes.csv` | 38 almacenes, uno por provincia peninsular con tiendas | **todo SINTÉTICO**: ubicación = centroide de las tiendas de la provincia, capacidad = 1,5 × demanda media (mín. 1.500 kg/semana), horario 06–20 h L-V. Se genera con `code/generar_almacenes.py`; se puede editar a mano |
+| `almacenes.csv` | 38 almacenes, uno por provincia peninsular con tiendas | **todo SINTÉTICO**: ubicación = **polígono industrial principal** de la provincia (elegido por el equipo en `code/modare/poligonos.py`, coordenadas de OpenStreetMap/Nominatim cacheadas en `poligonos_geocodificados.json`; Zamora fijado a mano, Palencia en el polígono San Blas de Villalobón, junto a la capital), capacidad = 1,5 × demanda media (mín. 1.500 kg/semana), horario 06–20 h L-V. Se genera con `code/generar_almacenes.py`; se puede editar a mano |
 | `tiendas.csv` | 182 tiendas | ventas €/año, tamaño, ventana de recepción, `vehiculo_max`, `acceso_carretera` (7 de Baleares = 0), `en_muestra` (53 para pruebas) |
 | `vehiculos.csv` | 5 tipos: FUR 3,5 t, R75, R12, R18, ART 40 t | carga útil kg, volumen m³, palés |
 | `emisiones.csv` | kgCO₂e/km vacío y lleno por tipo (DEFRA 2025) | de aquí sale el **consumo propio** de cada camión |
 | `tarifas.csv` | Operador A (€/km + €/h, ilimitado) y B (€/día + €/km, unidades limitadas) | |
-| `distancias.csv` | matriz 181×181 km y minutos de camión (OSRM o línea recta ×1,26) | islas no incluidas; **los almacenes no están**: se usa línea recta × `factor_rodeo` |
+| `distancias.csv` | matriz completa **por carretera (OSRM)** entre plantas, almacenes y tiendas: km, min de coche y min de camión (×`factor_tiempo_camion`) | 219 puntos, 47.742 pares, islas no incluidas. Se regenera con `code/calcular_distancias.py` (~30 s); hay que repetirlo si se mueven/añaden almacenes, plantas o tiendas. Si a un par le falta dato se usa línea recta × `factor_rodeo` |
+| `geometrias_osrm.json` | caché de trazados por carretera de cada tramo (polyline) para el mapa | se rellena sola al guardar un plan |
 | `parametros.csv` | todos los supuestos de negocio (kg/palé, frecuencias, jornada, días máx. de ruta, `tipos_troncal`…) | **cambiad aquí los supuestos, no en el código** |
 
 Demanda por defecto (si la tienda no pide): `kg_semana = ventas / precio_medio_eur_kg / semanas_venta_anio`
@@ -108,11 +109,13 @@ code/
   modare/pedidos.py   SQLite (code/pedidos.db), un pedido por (semana ISO, tienda)
   modare/planificador.py  orquesta todo y escribe salidas/<semana>/
   modare/visualizar.py    genera salidas/<semana>/mapa.html
+  modare/osrm.py      cliente OSRM: matriz de distancias y trazados de rutas (1 petición/s, con caché)
+  calcular_distancias.py  regenera data/distancias.csv por carretera
   templates/          HTML de la app (Leaflet para el mapa)
 ```
 
 ### Salidas (`code/salidas/<semana>/`, se sobrescriben en cada ejecución de esa semana)
-- `mapa.html`: grafo sobre el mapa (troncal = línea gruesa del color de la planta, reparto = línea fina),
+- `mapa.html`: grafo sobre el mapa con el **trazado real por carretera** (troncal = línea gruesa del color de la planta, reparto = línea fina),
   lista de rutas filtrable por escalón y planta, y cronograma semanal. Se abre con doble clic (fondo Esri, sin API key).
 - `rutas.csv`: una fila por ruta. Nombres `T-MAD-01` (troncal desde la planta de Madrid), `R-SEVILLA-02`
   (reparto desde el almacén de Sevilla); el id interno del solver va en `id_solver`.
@@ -124,6 +127,7 @@ code/
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 .venv\Scripts\python generar_almacenes.py                                         # solo si falta data/almacenes.csv
+.venv\Scripts\python calcular_distancias.py                                       # tras cambiar almacenes/plantas/tiendas
 .venv\Scripts\python optimizar.py --muestra --fuente estimacion --segundos 10   # prueba rápida (~15 s)
 .venv\Scripts\python optimizar.py --semana 2026-W47 --segundos 30               # red completa (~60 s)
 .venv\Scripts\python app.py                                                      # http://127.0.0.1:5000
@@ -137,16 +141,22 @@ Dos escalones (modelo actual):
 
 | Escenario | Rutas (troncal + reparto) | Camiones | km | Coste (troncal + reparto) | CO₂ | Servicio |
 |---|---|---|---|---|---|---|
-| Asignación óptima, fuente mixto | 69 (10 + 59) | 50 | 11.406 | 14.577 € (7.453 + 7.124) | 5,4 t | 100 % |
-| Asignación actual, semana W48, estimación | 70 (11 + 59) | 51 | 12.100 | 15.780 € (8.720 + 7.060) | 6,0 t | 100 % (troncal 97 %) |
+| Asignación óptima, almacenes en **polígonos**, distancias por carretera | 69 (10 + 59) | 52 | 12.401 | 16.037 € (7.702 + 8.335) | 5,7 t | 100 % |
+| Ídem con almacenes en el centroide de la provincia | 64 (10 + 54) | 52 | 11.372 | 16.425 € (8.221 + 8.204) | 5,5 t | 100 % |
+| Ídem con distancias en línea recta ×1,26 (antes de OSRM) | 69 (10 + 59) | 50 | 11.406 | 14.577 € (7.453 + 7.124) | 5,4 t | 100 % |
+| Asignación actual, semana W48, línea recta ×1,26 | 70 (11 + 59) | 51 | 12.100 | 15.780 € (8.720 + 7.060) | 6,0 t | 100 % (troncal 97 %) |
 
-El troncal sale casi todo en rígidos de 12 t (un tráiler para Barcelona) y el reparto en furgonetas; 0,46 €/kg.
+El troncal sale casi todo en rígidos de 12 t (un tráiler para Barcelona) y el reparto en furgonetas; 0,52 €/kg.
+Con distancias reales los km apenas cambian, pero los tiempos son mayores (sobre todo en tramos urbanos),
+lo que encarece el coste por hora del operador A un ~13 %.
+La primera ejecución tarda ~1 min más porque pide a OSRM el trazado de cada ruta (luego queda en caché).
 **Ojo al comparar con el modelo directo anterior** (planta → tienda: 17.025 €, 19 camiones): el coste de dos
 escalones **no incluye operar los almacenes** (manipulación, alquiler, personal), que hoy vale 0; y los camiones
 físicos del reparto se cuentan por almacén (cada almacén necesita al menos uno).
 
 ## Supuestos y limitaciones (decidlos/validadlos con la ONG)
-- **Almacenes inventados** (ubicación, capacidad, horario): ver `almacenes.csv` y `generar_almacenes.py`.
+- **Almacenes inventados** (qué polígono, capacidad, horario): ver `almacenes.csv`, `modare/poligonos.py` y `generar_almacenes.py`.
+  Tras cambiar un almacén: `generar_almacenes.py` → `calcular_distancias.py` → `optimizar.py`.
 - Coste de operar los almacenes no modelado (añadir €/kg manipulado o coste fijo por almacén abierto).
 - Todos los almacenes se consideran abiertos; no se decide cuáles abrir (sería un problema de localización).
 - Sincronización troncal/reparto por stock (la reposición de W sirve el reparto de W+1).
@@ -157,7 +167,7 @@ físicos del reparto se cuentan por almacén (cada almacén necesita al menos un
 - La tarifa €/km ya incluye combustible; los litros y € de gasóleo se reportan solo como información.
 - Las rutas no se encadenan explícitamente por camión (multi-trip): la flota física se estima por solapamiento.
 - Vuelta al depósito en vacío: la logística inversa (`kg_retorno_por_kg_entregado`) no está modelada aún.
-- El mapa dibuja líneas rectas entre paradas, no el trazado por carretera.
+- OSRM público usa el perfil de **coche**; el tiempo de camión = tiempo de coche × `factor_tiempo_camion` (1,2). No tiene en cuenta restricciones de camión (gálibo, peso, ZBE).
 
 ## Siguientes pasos posibles
 - Coste de almacén y decisión de qué almacenes abrir (localización de cross-docks).

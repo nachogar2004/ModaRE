@@ -22,6 +22,7 @@ from . import config as C
 from . import pedidos as PED
 from .asignacion import asignar, plantas_activas
 from .datos import cargar_datos, construir_visitas, construir_visitas_troncal, demanda_estimada
+from .osrm import añadir_geometrias
 from .simulacion import flota_necesaria, simular_ruta
 from .vrp import PORTAFOLIO, resolver_planta
 
@@ -166,13 +167,16 @@ def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: 
         "resumen": resumen, "flota": flota_necesaria(rutas),
         "plantas": [{"id": p, "nombre": pl.loc[p].nombre, "lat": pl.loc[p].lat, "lon": pl.loc[p].lon, **u}
                     for p, u in uso["plantas"].items()],
-        "almacenes": [{"id": a, "nombre": al.loc[a].nombre, "lat": al.loc[a].lat, "lon": al.loc[a].lon, **u}
+        "almacenes": [{"id": a, "nombre": al.loc[a].nombre, "lat": al.loc[a].lat, "lon": al.loc[a].lon,
+                       "poligono": str(al.loc[a].get("poligono", "") or ""),
+                       "municipio": str(al.loc[a].get("municipio", "") or ""), **u}
                       for a, u in sorted(uso["almacenes"].items())],
         "rutas": rutas,
         "no_servidas": [{"escalon": esc, "visita": i, "tienda": vis_by_id[i].tienda, "kg": vis_by_id[i].kg,
                          "nombre": d.nombre_lugar(vis_by_id[i].tienda)[0]} for esc, i in no_servidas],
         "avisos": avisos,
     }
+    añadir_geometrias(plan, log)   # trazado por carretera de cada tramo (para el mapa)
     guardar(plan)
     return plan
 

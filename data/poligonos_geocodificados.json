@@ -1,0 +1,306 @@
+{
+ "AL-ACORUNA": {
+  "lat": 43.326091,
+  "lon": -8.50289,
+  "poligono": "Polígono de Sabón",
+  "municipio": "Arteixo",
+  "osm": "place/hamlet: Sabón, Oseiro, Arteixo, A Coruña, Galicia, 15142, España",
+  "consulta": "Sabón Arteixo"
+ },
+ "AL-ALBACETE": {
+  "lat": 39.020454,
+  "lon": -1.883916,
+  "poligono": "Polígono Industrial Campollano",
+  "municipio": "Albacete",
+  "osm": "landuse/industrial: Parque Empresarial Campollano, Cañicas-Canal de María Cristina, Albacete, Castilla-La Mancha, España",
+  "consulta": "Campollano Albacete"
+ },
+ "AL-ALICANTE": {
+  "lat": 38.340897,
+  "lon": -0.563938,
+  "poligono": "Polígono Industrial Las Atalayas",
+  "municipio": "Alicante",
+  "osm": "amenity/restaurant: Las Atalayas, Carrer del Marc, Polígon Industrial Les Talaies, Alacant / Alicante, l'Alacantí, Alacant / Alicante, Comunitat Valenciana, 03114, España",
+  "consulta": "Las Atalayas Alicante"
+ },
+ "AL-ALMERIA": {
+  "lat": 36.881004,
+  "lon": -2.415249,
+  "poligono": "Polígono Industrial La Juaida",
+  "municipio": "Viator",
+  "osm": "landuse/industrial: Polígono Industrial La Juaida, Viator, Almería, Andalucía, 04240, España",
+  "consulta": "Polígono La Juaida"
+ },
+ "AL-ARABA": {
+  "lat": 42.840722,
+  "lon": -2.737512,
+  "poligono": "Polígono Industrial de Júndiz",
+  "municipio": "Vitoria-Gasteiz",
+  "osm": "landuse/industrial: Jundiz, Lermanda, Vitoria-Gasteiz, Gasteizko kuadrilla, Araba / Álava, Euskadi, 01015, España",
+  "consulta": "Júndiz"
+ },
+ "AL-ASTURIAS": {
+  "lat": 43.426273,
+  "lon": -5.838207,
+  "poligono": "Polígono Industrial de Asipo",
+  "municipio": "Llanera",
+  "osm": "landuse/industrial: Polígono Industrial de Asipo, El Campón, Cayés, Llanera, Asturias / Asturies, España",
+  "consulta": "Asipo Llanera"
+ },
+ "AL-BARCELONA": {
+  "lat": 41.335091,
+  "lon": 2.122357,
+  "poligono": "Zona Franca de Barcelona",
+  "municipio": "Barcelona",
+  "osm": "landuse/industrial: Zona Franca de Barcelona, la Marina del Prat Vermell, Sants-Montjuïc, Barcelona, Barcelonès, Barcelona, Catalunya, 08040, España",
+  "consulta": "Zona Franca de Barcelona"
+ },
+ "AL-BIZKAIA": {
+  "lat": 43.302434,
+  "lon": -2.951771,
+  "poligono": "Polígono Industrial de Asua",
+  "municipio": "Erandio",
+  "osm": "place/neighbourhood: Asua, Erandiogoikoa, Erandio, Bizkaia, Euskadi, 48180, España",
+  "consulta": "Asua Erandio"
+ },
+ "AL-BURGOS": {
+  "lat": 42.360387,
+  "lon": -3.756438,
+  "poligono": "Polígono Industrial de Villalonquéjar",
+  "municipio": "Burgos",
+  "osm": "building/industrial: Metacrilatos Burgos, 13, Calle Montes de Oca, Polígono Industrial de Villalonquéjar, Villalonquéjar, Burgos, Castilla y León, 09001, España",
+  "consulta": "Polígono Villalonquéjar Burgos"
+ },
+ "AL-CANTABRIA": {
+  "lat": 43.397168,
+  "lon": -3.847747,
+  "poligono": "Polígono Industrial de Guarnizo",
+  "municipio": "El Astillero",
+  "osm": "landuse/industrial: Polígono Industrial de Guarnizo, Boo de Guarnizo, El Astillero, Cantabria, 39611, España",
+  "consulta": "Polígono Industrial de Guarnizo"
+ },
+ "AL-CASTELLON": {
+  "lat": 39.975432,
+  "lon": -0.077275,
+  "poligono": "Ciudad del Transporte",
+  "municipio": "Castellón de la Plana",
+  "osm": "landuse/industrial: Ciutat del Transport, Castelló de la Plana / Castellón de la Plana, la Plana Alta, Castelló / Castellón, Comunitat Valenciana, España",
+  "consulta": "Ciudad del Transporte Castellón"
+ },
+ "AL-CIUDADREAL": {
+  "lat": 38.97594,
+  "lon": -3.931854,
+  "poligono": "Polígono Industrial Larache",
+  "municipio": "Ciudad Real",
+  "osm": "landuse/industrial: Polígono Industrial Larache, Los Ángeles, Ciudad Real, Castilla-La Mancha, España",
+  "consulta": "Larache Ciudad Real"
+ },
+ "AL-CACERES": {
+  "lat": 39.488799,
+  "lon": -6.434568,
+  "poligono": "Polígono Industrial Las Capellanías",
+  "municipio": "Cáceres",
+  "osm": "place/locality: Las Capellanías, Cáceres, Extremadura, 10005, España",
+  "consulta": "Las Capellanías Cáceres"
+ },
+ "AL-CADIZ": {
+  "lat": 36.636567,
+  "lon": -6.133078,
+  "poligono": "Parque Empresarial / Polígono El Portal",
+  "municipio": "Jerez de la Frontera",
+  "osm": "place/hamlet: El Portal, Jerez de la Frontera, Campiña de Jerez, Cádiz, Andalucía, 11406, España",
+  "consulta": "El Portal Jerez"
+ },
+ "AL-CORDOBA": {
+  "lat": 37.890856,
+  "lon": -4.706546,
+  "poligono": "Polígono Industrial Las Quemadas",
+  "municipio": "Córdoba",
+  "osm": "place/hamlet: Las Quemadas, Córdoba, Andalucía, 14014, España",
+  "consulta": "Las Quemadas Córdoba"
+ },
+ "AL-GIPUZKOA": {
+  "lat": 43.282027,
+  "lon": -2.014234,
+  "poligono": "Polígono Industrial Belartza",
+  "municipio": "Donostia / San Sebastián",
+  "osm": "boundary/administrative: Belartza, Añorga, Mendebaldea, Donostia / San Sebastián, Gipuzkoa, Euskadi, España",
+  "consulta": "Belartza"
+ },
+ "AL-GIRONA": {
+  "lat": 41.960412,
+  "lon": 2.804263,
+  "poligono": "Polígon Industrial Mas Xirgu",
+  "municipio": "Girona",
+  "osm": "boundary/administrative: Mas Xirgu, Girona, Gironès, Girona, Catalunya, España",
+  "consulta": "Mas Xirgu"
+ },
+ "AL-HUESCA": {
+  "lat": 42.104039,
+  "lon": -0.446349,
+  "poligono": "Plataforma Logística de Huesca (PLHUS)",
+  "municipio": "Huesca",
+  "osm": "landuse/commercial: Plataforma Logística - Huesca sur (PLHUS), Huesca, Huesca/Uesca, Hoya de Huesca / Plana de Uesca, Huesca, Aragón, España",
+  "consulta": "PLHUS"
+ },
+ "AL-LARIOJA": {
+  "lat": 42.47328,
+  "lon": -2.410075,
+  "poligono": "Polígono Industrial Cantabria",
+  "municipio": "Logroño",
+  "osm": "office/company: Azkar, paquetería de Logroño, Avenida de Mendavia, Polígono industrial Cantabria I, Varea, Logroño, La Rioja, 26009, España",
+  "consulta": "Polígono Cantabria Logroño"
+ },
+ "AL-LEON": {
+  "lat": 42.541565,
+  "lon": -5.580624,
+  "poligono": "Polígono Industrial de Onzonilla",
+  "municipio": "Onzonilla",
+  "osm": "landuse/industrial: Polígono Industrial de León, Onzonilla, León, Castilla y León, 24231, España",
+  "consulta": "Polígono Industrial de Onzonilla"
+ },
+ "AL-MADRID": {
+  "lat": 40.436487,
+  "lon": -3.559405,
+  "poligono": "Centro de Transportes de Coslada",
+  "municipio": "Coslada",
+  "osm": "landuse/industrial: Centro de transportes de Coslada, Coslada, Comunidad de Madrid, España",
+  "consulta": "Centro de Transportes de Coslada"
+ },
+ "AL-MURCIA": {
+  "lat": 37.955049,
+  "lon": -1.196157,
+  "poligono": "Polígono Industrial Oeste",
+  "municipio": "Murcia (San Ginés)",
+  "osm": "landuse/industrial: Polígono Industrial Oeste, Alcantarilla, Área Metropolitana de Murcia, Región de Murcia, España",
+  "consulta": "Polígono Industrial Oeste Murcia"
+ },
+ "AL-PONTEVEDRA": {
+  "lat": 42.121392,
+  "lon": -8.68265,
+  "poligono": "Polígono Industrial A Granxa",
+  "municipio": "O Porriño",
+  "osm": "place/hamlet: A Granxa, Chenlo, O Porriño, Vigo, Pontevedra, Galicia, 36412, España",
+  "consulta": "A Granxa Porriño"
+ },
+ "AL-SEGOVIA": {
+  "lat": 40.911633,
+  "lon": -4.115676,
+  "poligono": "Polígono Industrial de Hontoria",
+  "municipio": "Segovia",
+  "osm": "landuse/industrial: Polígono industrial de Praderejas, Sexmo de San Millán, Hontoria, Comunidad de Ciudad y Tierra de Segovia, Segovia, Castilla y León, España",
+  "consulta": "Polígono de Hontoria"
+ },
+ "AL-SEVILLA": {
+  "lat": 37.39293,
+  "lon": -5.948486,
+  "poligono": "Polígono Industrial Carretera Amarilla",
+  "municipio": "Sevilla",
+  "osm": "landuse/industrial: Polígono Industrial Carretera Amarilla, Distrito San Pablo-Santa Justa, Sevilla, Andalucía, España",
+  "consulta": "Carretera Amarilla Sevilla"
+ },
+ "AL-SORIA": {
+  "lat": 41.775712,
+  "lon": -2.486019,
+  "poligono": "Polígono Industrial Las Casas",
+  "municipio": "Soria",
+  "osm": "landuse/industrial: Polígono Industrial Las Casas, Las Casas, Soria, Castilla y León, España",
+  "consulta": "Polígono Las Casas Soria"
+ },
+ "AL-TARRAGONA": {
+  "lat": 41.137111,
+  "lon": 1.219598,
+  "poligono": "Polígon Industrial Riu Clar",
+  "municipio": "Tarragona",
+  "osm": "landuse/industrial: Polígon industrial Riu Clar, Tarragona, Tarragonès, Tarragona, Catalunya, España",
+  "consulta": "Polígon Riu Clar"
+ },
+ "AL-TERUEL": {
+  "lat": 40.374794,
+  "lon": -1.167892,
+  "poligono": "Plataforma Logístico-Industrial de Teruel (PLATEA)",
+  "municipio": "Teruel",
+  "osm": "landuse/industrial: Plataforma Logística de Teruel, Teruel, Comunidad de Teruel, Teruel, Aragón, España",
+  "consulta": "PLATEA Teruel"
+ },
+ "AL-TOLEDO": {
+  "lat": 39.865495,
+  "lon": -3.946062,
+  "poligono": "Polígono Industrial de Toledo (Santa María de Benquerencia)",
+  "municipio": "Toledo",
+  "osm": "place/suburb: Santa María de Benquerencia, Toledo, Castilla-La Mancha, 45007, España",
+  "consulta": "Santa María de Benquerencia Toledo"
+ },
+ "AL-VALENCIA": {
+  "lat": 39.504503,
+  "lon": -0.444917,
+  "poligono": "Polígono Industrial Fuente del Jarro",
+  "municipio": "Paterna",
+  "osm": "amenity/drinking_water: Font del Gerro, Carrer de Mallent i Meri, Alborgí, la Coma, Paterna, l'Horta Nord, València / Valencia, Comunitat Valenciana, 46988, España",
+  "consulta": "Font del Gerro"
+ },
+ "AL-VALLADOLID": {
+  "lat": 41.620415,
+  "lon": -4.704337,
+  "poligono": "Polígono Industrial de San Cristóbal",
+  "municipio": "Valladolid",
+  "osm": "boundary/administrative: Polígono San Cristóbal, Valladolid, Castilla y León, España",
+  "consulta": "Polígono San Cristóbal Valladolid"
+ },
+ "AL-ZARAGOZA": {
+  "lat": 41.640383,
+  "lon": -0.994919,
+  "poligono": "Plataforma Logística de Zaragoza (PLAZA)",
+  "municipio": "Zaragoza",
+  "osm": "landuse/industrial: Plataforma Logística de Zaragoza, Garrapinillos, Distrito Rural, Zaragoza, Aragón, España",
+  "consulta": "Plataforma Logística de Zaragoza"
+ },
+ "AL-GUADALAJARA": {
+  "lat": 40.657478,
+  "lon": -3.183824,
+  "poligono": "Polígono Industrial El Henares",
+  "municipio": "Guadalajara",
+  "osm": "landuse/industrial: Polígono Industrial El Henares, La Estación, Guadalajara, Castilla-La Mancha, España",
+  "consulta": "Polígono Industrial El Henares, Guadalajara"
+ },
+ "AL-JAEN": {
+  "lat": 37.798322,
+  "lon": -3.785723,
+  "poligono": "Polígono Industrial Los Olivares",
+  "municipio": "Jaén",
+  "osm": "landuse/industrial: Polígono Industrial Los Olivares, Jaén, Andalucía, España",
+  "consulta": "polígono industrial Los Olivares Jaén"
+ },
+ "AL-LLEIDA": {
+  "lat": 41.621785,
+  "lon": 0.657086,
+  "poligono": "Polígon Industrial El Segre",
+  "municipio": "Lleida",
+  "osm": "office/yes: Associació de Propietaris del Polígon Industrial el Segre, Carrer de la Mineria, Polígon el Segre, Lleida, Segrià, Lleida, Catalunya, 25191, España",
+  "consulta": "Polígon Industrial El Segre, Lleida"
+ },
+ "AL-OURENSE": {
+  "lat": 42.289254,
+  "lon": -7.819923,
+  "poligono": "Polígono Industrial de San Cibrao das Viñas",
+  "municipio": "San Cibrao das Viñas",
+  "osm": "landuse/industrial: Polígono Industrial de San Cibrao das Viñas, Noalla, San Cibrao das Viñas, Ourense, Galicia, España",
+  "consulta": "polígono industrial San Cibrao das Viñas"
+ },
+ "AL-PALENCIA": {
+  "lat": 42.021678,
+  "lon": -4.508952,
+  "poligono": "Polígono Industrial San Blas (junto a Palencia capital)",
+  "municipio": "Villalobón",
+  "osm": "landuse/industrial: Polígono Industrial San Blas, Villalobón, Palencia, Castilla y León, España",
+  "consulta": "Polígono de Villalobón"
+ },
+ "AL-ZAMORA": {
+  "lat": 41.469726,
+  "lon": -5.767326,
+  "poligono": "Polígono Industrial Los Llanos",
+  "municipio": "Zamora",
+  "osm": "landuse/industrial: Polígono Industrial \"Los Llanos\", Zamora, Castilla y León, España (fijado a mano)",
+  "consulta": "polígono industrial Zamora"
+ }
+}
