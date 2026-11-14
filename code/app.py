@@ -9,6 +9,7 @@
 
     .venv/bin/python app.py      ->  http://127.0.0.1:5000      (Windows: .venv/Scripts/python app.py)
 """
+import multiprocessing
 import os
 import re
 import threading
@@ -27,8 +28,13 @@ from modare.planificador import cargar_plan, planificar
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("MODARE_SECRET_KEY", "hackathon-modare")   # cambiadla en producción
-gestion.init_app(app)
-DATOS = cargar_datos()
+# En Windows el optimizador lanza procesos hijos (spawn) que reimportan este fichero como __mp_main__.
+# Allí NO hay que montar la app ni abrir/sembrar la base de datos SQLite: competiría con las peticiones
+# web mientras se calculan las rutas y hacía caer el servidor al navegar a otra página.
+_ES_HIJO = multiprocessing.parent_process() is not None
+if not _ES_HIJO:
+    gestion.init_app(app)
+    DATOS = cargar_datos()
 TRABAJOS: dict[str, dict] = {}   # semana -> {"estado": "calculando"|"ok"|"error", "msg": str}
 
 

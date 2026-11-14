@@ -35,11 +35,11 @@ def _init_trabajador():
 
 
 def _resolver_y_simular(args):
-    escalon, dep, visitas, segundos, precio_co2, estrategia, excluir, tipos = args
+    escalon, dep, visitas, segundos, precio_co2, estrategia, excluir, tipos, previo = args
     d = _D if _D is not None else cargar_datos()
     # reparto desde un almacén provincial: el conductor vuelve a dormir a casa (rutas de 1 día por defecto)
     dias_max = int(d.P.get("dias_max_ruta_reparto", d.P["dias_max_ruta"])) if escalon == "reparto" else None
-    res = resolver_planta(d, dep, visitas, segundos, precio_co2, estrategia, excluir, tipos, dias_max)
+    res = resolver_planta(d, dep, visitas, segundos, precio_co2, estrategia, excluir, tipos, dias_max, previo)
     res["rutas"] = [simular_ruta(d, dep, r) for r in res["rutas"]]
     res["escalon"] = escalon
     return res
@@ -53,6 +53,22 @@ def _mejor(resultados: list[dict]) -> dict:
 def _segundos_reparto(segundos: int, n_visitas: int) -> int:
     """Los almacenes tienen pocas tiendas: tiempo de búsqueda proporcional al tamaño."""
     return max(3, min(segundos, math.ceil(segundos * n_visitas / 25)))
+
+
+def _rutas_previas(semana: str) -> dict[str, list[dict]]:
+    """Rutas por depósito de un plan anterior, para arrancar el solver en caliente: el de esta misma semana
+    si se vuelve a calcular, y si no el más reciente de una semana anterior. {} si no hay ninguno."""
+    try:
+        candidatas = sorted((p.name for p in C.SALIDAS_DIR.iterdir() if (p / "plan.json").exists()), reverse=True)
+        elegida = next((n for n in candidatas if n <= semana), None)
+        plan = cargar_plan(elegida) if elegida else None
+    except Exception:  # noqa: BLE001 — un plan previo ilegible no debe impedir calcular
+        return {}
+    por_dep: dict[str, list[dict]] = defaultdict(list)
+    for r in (plan or {}).get("rutas", []):
+        por_dep[r.get("origen", r["planta"])].append(
+            {"id": r["id"], "tarifa": r.get("tarifa"), "visitas": [p["visita"] for p in r["paradas"]]})
+    return dict(por_dep)
 
 
 def _kpis(rutas: list[dict]) -> dict:
@@ -100,20 +116,23 @@ def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: 
         f"{len(uso['almacenes'])} almacenes, {len(troncal)} reposiciones troncales desde {plantas}")
 
     tipos_troncal = set(str(d.P["tipos_troncal"]).split(";"))
+    previas = _rutas_previas(semana)
     trabajos = []
     por_planta = defaultdict(list)
     for v in troncal:
         por_planta[v.deposito].append(v)
     for p, vs in por_planta.items():
         for e, x in (PORTAFOLIO[:3] if paralelo else PORTAFOLIO[:1]):
-            trabajos.append(("troncal", p, vs, segundos, precio_co2, e, x, tipos_troncal))
+            trabajos.append(("troncal", p, vs, segundos, precio_co2, e, x, tipos_troncal,
+                             previas.get(p)))
     por_almacen = defaultdict(list)
     for v in visitas:
         por_almacen[v.deposito].append(v)
     for a, vs in por_almacen.items():
         port = PORTAFOLIO if len(vs) > 6 else PORTAFOLIO[:2]
         for e, x in (port if paralelo else port[:1]):
-            trabajos.append(("reparto", a, vs, _segundos_reparto(segundos, len(vs)), precio_co2, e, x, None))
+            trabajos.append(("reparto", a, vs, _segundos_reparto(segundos, len(vs)), precio_co2, e, x, None,
+                             previas.get(a)))
     trabajos.sort(key=lambda t: -t[3])   # los largos primero: reparte mejor la carga entre procesos
     if paralelo and len(trabajos) > 1:
         with ProcessPoolExecutor(max_workers=min(len(trabajos), os.cpu_count() or 4),
