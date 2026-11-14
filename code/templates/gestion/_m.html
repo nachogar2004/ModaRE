@@ -1,40 +1,85 @@
-{# Macros comunes de la app de gestión #}
+{# Componentes comunes de ReMode Studio. Importar con:  {% from "gestion/_m.html" import ... with context %} #}
 
 {% macro csrf() %}<input type="hidden" name="_csrf" value="{{ csrf_token() }}">{% endmacro %}
 
+{% macro icono(nombre, extra='') %}<svg class="i {{ extra }}" aria-hidden="true"><use href="#i-{{ nombre }}"/></svg>{% endmacro %}
+
+{# Cabecera de página. Acciones a la derecha con {% call cabecera(...) %}…{% endcall %} #}
+{% macro cabecera(titulo, sub=None, eyebrow=None) %}
+<div class="page-head">
+  <div>
+    {% if eyebrow %}<div class="eyebrow">{{ eyebrow }}</div>{% endif %}
+    <h1>{{ titulo }}</h1>
+    {% if sub %}<div class="sub">{{ sub }}</div>{% endif %}
+  </div>
+  {% if caller is defined %}<div class="actions">{{ caller() }}</div>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro kpi(valor, etiqueta, icon=None, tono='', extra=None) %}
+<div class="kpi {{ 'tone-' ~ tono if tono }}">
+  {% if icon %}<span class="ic">{{ icono(icon) }}</span>{% endif %}
+  <div class="v">{{ valor }}</div><div class="l">{{ etiqueta }}</div>
+  {% if extra %}{{ extra }}{% endif %}
+</div>
+{% endmacro %}
+
+{% macro vacio(texto, icon='inbox', cols=1) %}
+<tr><td colspan="{{ cols }}" class="empty">{{ icono(icon) }}{{ texto }}</td></tr>
+{% endmacro %}
+
 {% macro estado(e, textos=None) %}<span class="pill {{ e }}">{{ (textos or ESTADOS_PEDIDO).get(e, e) }}</span>{% endmacro %}
+
+{% macro tipo_pedido(t) %}<span class="pill {{ t }}">{{ {'automatico': 'Automático', 'adicional': 'Adicional'}.get(t, t) }}</span>{% endmacro %}
 
 {% macro barra(frac) %}
   {% set cls = 'err' if frac > 1 else ('warn' if frac >= 0.9 else '') %}
-  <div class="bar {{ cls }}" title="{{ frac|pct }}"><i style="width:{{ [frac * 100, 100]|min }}%"></i></div>
+  <div class="bar {{ cls }}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ (frac * 100)|round|int }}" title="{{ frac|pct }}"><i style="width:{{ [frac * 100, 100]|min }}%"></i></div>
 {% endmacro %}
 
-{% macro alertas(lista) %}
-  {% for nivel, txt in lista %}<div class="alerta {{ nivel }}">{{ txt }}</div>{% endfor %}
+{% macro medidor(frac) %}<div class="meter">{{ barra(frac) }}<span>{{ frac|pct }}</span></div>{% endmacro %}
+
+{% macro alertas(lista, vacio_ok=False) %}
+  {% for nivel, txt in lista %}<div class="alerta {{ nivel }}">{{ icono('alert') }}<div>{{ txt }}</div></div>{% endfor %}
+  {% if vacio_ok and not lista %}<div class="todo-ok">{{ icono('check-circle') }} Todo en orden: no hay alertas.</div>{% endif %}
 {% endmacro %}
 
-{# Tabla segmento × tipo de prenda. valores: dict categoria_id -> número. input: prefijo de los campos o None #}
-{% macro rejilla(m, valores=None, input=None, extra=None, minimo=0, placeholder='') %}
+{# Tabla segmento × tipo de prenda.
+   valores: categoria_id -> número (solo lectura) · input: prefijo de los campos (formulario)
+   extra: categoria_id -> (texto, bajo?) bajo el valor · total_vivo: total de prendas/kg/cajas mientras se escribe #}
+{% macro rejilla(m, valores=None, input=None, extra=None, minimo=0, placeholder='', total_vivo=False) %}
 <div class="scroll"><table class="grid">
-  <tr><th></th>{% for c in m['Mujer'] %}<th>{{ c.tipo }}</th>{% endfor %}<th>Total</th></tr>
-  {% for seg, fila in m.items() %}
-  <tr><td><b>{{ seg }}</b></td>
+  <thead><tr><th></th>{% for tipo in m.tipos %}<th>{{ tipo }}</th>{% endfor %}{% if not input %}<th>Total</th>{% endif %}</tr></thead>
+  <tbody>
+  {% for seg, fila in m.filas.items() %}
+  <tr><td>{{ seg }}</td>
     {% for c in fila %}
     <td>
-      {% if input %}
-        <input type="number" name="{{ input }}_{{ c.id }}" step="1" {% if minimo is not none %}min="{{ minimo }}"{% endif %}
+      {% if c is none %}<span class="muted">—</span>
+      {% elif input %}
+        <input type="number" name="{{ input }}_{{ c.id }}" step="1" inputmode="numeric" data-kg="{{ c.kg_unidad }}"
+               {% if minimo is not none %}min="{{ minimo }}"{% endif %} aria-label="{{ seg }} · {{ c.tipo }}"
                value="{{ valores.get(c.id, '') if valores else '' }}" placeholder="{{ placeholder }}">
       {% else %}
-        {{ (valores or {}).get(c.id, 0)|miles }}
-        {% if extra and extra.get(c.id) is not none %}<div class="ayuda">{{ extra.get(c.id) }}</div>{% endif %}
+        {% set v = (valores or {}).get(c.id, 0) %}
+        <span class="{{ 'cero' if v == 0 and extra is not none }}">{{ v|miles }}</span>
+        {% if extra and extra.get(c.id) %}{% set e = extra.get(c.id) %}<span class="cob {{ 'bajo' if e[1] }}">{{ e[0] }}</span>{% endif %}
       {% endif %}
     </td>
     {% endfor %}
-    {% set ns = namespace(t=0) %}{% for c in fila %}{% set ns.t = ns.t + ((valores or {}).get(c.id) or 0) %}{% endfor %}
-    <td>{% if not input %}<b>{{ ns.t|miles }}</b>{% endif %}</td>
+    {% if not input %}
+    {% set ns = namespace(t=0) %}{% for c in fila if c is not none %}{% set ns.t = ns.t + ((valores or {}).get(c.id) or 0) %}{% endfor %}
+    <td class="total">{{ ns.t|miles }}</td>
+    {% endif %}
   </tr>
   {% endfor %}
+  </tbody>
 </table></div>
+{% if input and total_vivo %}
+<div class="total-vivo mt" data-total-vivo data-kg-caja="{{ KG_POR_CAJA }}">
+  <span><b data-u>0</b> prendas</span><span>≈ <b data-kgt>0</b> kg</span><span>≈ <b data-cj>0</b> cajas</span>
+</div>
+{% endif %}
 {% endmacro %}
 
 {% macro lineas(obj) %}

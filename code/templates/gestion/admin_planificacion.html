@@ -1,109 +1,145 @@
 {% extends "base.html" %}
-{% from "gestion/_m.html" import csrf, estado, lineas with context %}
+{% from "gestion/_m.html" import csrf, icono, cabecera, kpi, vacio, estado, lineas with context %}
+{% block title %}Planificación {{ semana }} · ReMode Studio{% endblock %}
 {% block body %}
-<h1>Planificación semanal · {{ semana }}</h1>
-<form method="get" class="tools"><label style="margin:0">Semana</label>
-  <input name="semana" value="{{ semana }}" pattern="\d{4}-W\d{2}" style="max-width:120px"><button class="sec">Ver</button></form>
+{% set calculando = trabajo and trabajo.estado == 'calculando' %}
+{% call cabecera('Planificación · ' ~ semana, 'Próxima semana de entrega: las tiendas están pidiendo para ella' if semana == sem_actual else None, eyebrow='Operación') %}
+  <a class="btn ghost" href="{{ url_for('admin.planificacion', semana=sem_ant) }}">{{ icono('arrow-left') }}{{ sem_ant }}</a>
+  <form method="get" class="tools" style="margin:0"><input name="semana" value="{{ semana }}" pattern="\d{4}-W\d{2}" style="width:110px" aria-label="Semana"></form>
+  <a class="btn ghost" href="{{ url_for('admin.planificacion', semana=sem_sig) }}">{{ sem_sig }}{{ icono('arrow-right') }}</a>
+  {% if semana != sem_actual %}<a class="btn sec" href="{{ url_for('admin.planificacion', semana=sem_actual) }}">Próxima entrega</a>{% endif %}
+{% endcall %}
 
+<div class="steps">
+  <div class="step {{ 'hecho' if cerrada else 'actual' }}">Recibir pedidos</div>
+  <div class="step {{ 'hecho' if cerrada else '' }}">Cerrar semana</div>
+  <div class="step {{ 'hecho' if viajes else ('actual' if cerrada else '') }}">Optimizar rutas</div>
+  <div class="step {{ 'actual' if viajes else '' }}">Ejecutar y entregar</div>
+</div>
+
+{# ------------------------------------------------------------------ 1 · pedidos #}
 <div class="card">
-  <h2>1 · Pedidos de la semana {% if cerrada %}<span class="pill confirmado">cerrada</span>{% else %}<span class="pill pendiente">abierta</span>{% endif %}</h2>
-  <div class="kpis">
-    <div class="kpi"><div class="v">{{ peds|length }}</div><div class="l">pedidos de {{ tiendas }} tiendas</div></div>
-    <div class="kpi"><div class="v">{{ kg|miles }}</div><div class="l">kg</div></div>
-    <div class="kpi"><div class="v">{{ cajas|miles }}</div><div class="l">cajas</div></div>
-    {% for k, n in resumen.items() if n and k != 'cancelado' %}
-    <div class="kpi"><div class="v">{{ n }}</div><div class="l">{{ ESTADOS_PEDIDO[k]|lower }}</div></div>{% endfor %}
+  <div class="card-head">
+    <h2>1 · Pedidos de la semana {% if cerrada %}<span class="pill confirmado">cerrada</span>{% else %}<span class="pill pendiente">abierta</span>{% endif %}</h2>
+    <a href="{{ url_for('admin.pedidos', semana=semana) }}">Ver los {{ peds|length }} pedidos {{ icono('arrow-right') }}</a>
   </div>
-  <p class="muted">Al cerrar, los pedidos pendientes (automáticos + adicionales) pasan a «confirmado» y se suman por tienda en la tabla
-    de pedidos que lee la librería de rutas. Las tiendas ya no podrán pedir para esta semana.</p>
-  <div class="tools">
+  <div class="kpis mb0">
+    {{ kpi(peds|length, 'pedidos de ' ~ tiendas ~ ' tiendas', 'box') }}
+    {{ kpi(kg|miles ~ ' kg', cajas|miles ~ ' cajas', 'layers') }}
+    {% for k, n in resumen.items() if n and k != 'cancelado' %}{{ kpi(n, ESTADOS_PEDIDO[k]|lower) }}{% endfor %}
+  </div>
+  <p class="small mt">Al cerrar, los pedidos pendientes (automáticos + adicionales) pasan a «confirmado» y se suman por tienda
+    en la tabla que lee el optimizador. Las tiendas ya no podrán pedir para esta semana.</p>
+  <div class="actions">
     {% if not cerrada %}
-    <form method="post" action="{{ url_for('admin.cerrar') }}" style="margin:0">{{ csrf() }}<input type="hidden" name="semana" value="{{ semana }}"><button>Cerrar semana y confirmar pedidos</button></form>
+    <form method="post" action="{{ url_for('admin.cerrar') }}" data-confirm="¿Cerrar la semana {{ semana }}? Las tiendas ya no podrán pedir para ella.">{{ csrf() }}<input type="hidden" name="semana" value="{{ semana }}">
+      <button>{{ icono('lock') }}Cerrar semana y confirmar pedidos</button></form>
     {% else %}
-    <form method="post" action="{{ url_for('admin.cerrar') }}" style="margin:0">{{ csrf() }}<input type="hidden" name="semana" value="{{ semana }}"><button class="sec" title="Incluye pedidos pendientes nuevos">Volver a volcar pedidos</button></form>
-    <form method="post" action="{{ url_for('admin.reabrir') }}" style="margin:0" onsubmit="return confirm('Se borrarán las rutas y reposiciones de la semana. ¿Seguir?')">{{ csrf() }}<input type="hidden" name="semana" value="{{ semana }}"><button class="sec">Reabrir semana</button></form>
+    <form method="post" action="{{ url_for('admin.cerrar') }}">{{ csrf() }}<input type="hidden" name="semana" value="{{ semana }}">
+      <button class="sec" title="Incluye pedidos nuevos sin perder los ya planificados">{{ icono('refresh') }}Volver a volcar pedidos</button></form>
+    <form method="post" action="{{ url_for('admin.reabrir') }}" data-confirm="Se borrarán las rutas y reposiciones de {{ semana }} y los pedidos volverán a pendiente. ¿Seguir?">{{ csrf() }}<input type="hidden" name="semana" value="{{ semana }}">
+      <button class="ghost">{{ icono('unlock') }}Reabrir semana</button></form>
     {% endif %}
-    <a href="{{ url_for('admin.pedidos', semana=semana) }}">Ver los pedidos</a>
   </div>
 </div>
 
+{# ------------------------------------------------------------------ 2 · optimizar #}
 <div class="card">
-  <h2>2 · Optimizar rutas (planta → almacén → tienda)</h2>
-  {% if trabajo and trabajo.estado == 'calculando' %}
-    <p class="warn" id="estado">Calculando rutas… (suele tardar 1–2 minutos). La página se actualizará sola.</p>
+  <div class="card-head"><h2>2 · Optimizar rutas</h2><span class="small">planta → almacén → tienda</span></div>
+  {% if calculando %}
+    <div class="alerta info" id="estado">{{ icono('refresh') }}<div><b>Calculando rutas…</b> Suele tardar 1–2 minutos. La página se actualizará sola.</div></div>
     <script>
       setInterval(async () => {
-        const r = await fetch("{{ url_for('admin.estado', semana=semana) }}"); const j = await r.json();
-        if (j.estado !== 'calculando') location.reload();
+        try { const j = await (await fetch("{{ url_for('admin.estado', semana=semana) }}")).json();
+              if (j.estado !== 'calculando') location.reload(); } catch (e) {}
       }, 4000);
     </script>
   {% elif trabajo and trabajo.estado == 'error' %}
-    <p class="err">Error en la optimización: {{ trabajo.msg }}</p>
+    <div class="alerta err">{{ icono('alert') }}<div><b>Error en la optimización:</b> {{ trabajo.msg }}</div></div>
   {% elif trabajo and trabajo.estado == 'ok' %}
-    <p class="ok">{{ trabajo.msg }}</p>
+    <div class="alerta info">{{ icono('check-circle') }}<div>{{ trabajo.msg }}</div></div>
   {% endif %}
   <form method="post" action="{{ url_for('admin.optimizar') }}">{{ csrf() }}<input type="hidden" name="semana" value="{{ semana }}">
-    <div class="formgrid">
-      <div><label>Segundos de búsqueda por planta</label><input type="number" name="segundos" value="30" min="5" max="600"></div>
-      <div><label>Asignación tienda → almacén → planta</label><select name="asignacion">
-        <option value="optimo">Óptima (CP-SAT)</option><option value="actual">Actual (almacén provincial)</option></select></div>
-      <div><label>Precio del CO₂ (€/t)</label><input type="number" name="precio_co2" value="0" min="0" step="1"></div>
-      <div><label><input type="checkbox" name="plantas_futuras"> Incluir plantas futuras</label></div>
+    <details {% if not plan %}open{% endif %}>
+      <summary class="small" style="cursor:pointer">Opciones avanzadas</summary>
+      <div class="formgrid">
+        <div><label for="seg">Segundos de búsqueda por planta</label><input id="seg" type="number" name="segundos" value="30" min="5" max="600">
+          <div class="ayuda">Más tiempo, rutas algo mejores.</div></div>
+        <div><label for="asig">Asignación tienda → almacén → planta</label><select id="asig" name="asignacion">
+          <option value="optimo">Óptima (respeta capacidades y vetos)</option><option value="actual">Actual (almacén de su provincia)</option></select></div>
+        <div><label for="co2">Precio del CO₂ (€/t)</label><input id="co2" type="number" name="precio_co2" value="0" min="0" step="1">
+          <div class="ayuda">Mayor de 0 = prioriza rutas con menos emisiones.</div></div>
+        <div><label>&nbsp;</label><label class="check"><input type="checkbox" name="plantas_futuras"> Incluir plantas futuras</label></div>
+      </div>
+    </details>
+    <div class="form-foot">
+      <button {{ 'disabled' if not cerrada or calculando }}>{{ icono('zap') }}{{ 'Volver a optimizar' if plan else 'Optimizar e importar rutas' }}</button>
+      {% if not cerrada %}<span class="small">Primero cierra la semana.</span>{% endif %}
     </div>
-    <p><button {{ 'disabled' if not cerrada or (trabajo and trabajo.estado == 'calculando') }}>Optimizar e importar rutas</button>
-      {% if not cerrada %}<span class="muted">Cierra antes la semana.</span>{% endif %}</p>
   </form>
-  {% if plan %}
-    {% set r = plan.resumen %}
-    <div class="kpis">
-      <div class="kpi"><div class="v">{{ r.troncal.rutas }} + {{ r.reparto.rutas }}</div><div class="l">rutas troncal + reparto</div></div>
-      <div class="kpi"><div class="v">{{ r.camiones }}</div><div class="l">camiones necesarios</div></div>
-      <div class="kpi"><div class="v">{{ r.km|miles }}</div><div class="l">km</div></div>
-      <div class="kpi"><div class="v">{{ r.coste_eur|miles }} €</div><div class="l">coste ({{ r.eur_por_kg }} €/kg)</div></div>
-      <div class="kpi"><div class="v">{{ (r.co2_kg / 1000)|miles(1) }} t</div><div class="l">CO₂</div></div>
-      <div class="kpi"><div class="v">{{ r.nivel_servicio|pct }}</div><div class="l">nivel de servicio</div></div>
-    </div>
-    <div class="tools" style="margin-top:12px">
-      <a class="btn" href="{{ url_for('plan', semana=semana) }}">Ver mapa y analítica del plan</a>
-      <form method="post" action="{{ url_for('admin.importar') }}" style="margin:0">{{ csrf() }}<input type="hidden" name="semana" value="{{ semana }}">
-        <button class="sec" title="Vuelve a leer code/salidas/{{ semana }}/plan.json">Reimportar plan</button></form>
-    </div>
-    {% if plan.avisos %}<details><summary class="warn">{{ plan.avisos|length }} avisos del optimizador</summary>
-      <ul>{% for a in plan.avisos %}<li>{{ a.nombre }}: {{ a.motivo }}</li>{% endfor %}</ul></details>{% endif %}
+
+  {% if plan %}{% set r = plan.resumen %}
+  <div class="kpis mt">
+    {{ kpi(r.troncal.rutas ~ ' + ' ~ r.reparto.rutas, 'rutas troncal + reparto', 'route') }}
+    {{ kpi(r.camiones, 'camiones necesarios', 'truck') }}
+    {{ kpi(r.km|miles, 'km', 'map') }}
+    {{ kpi(r.coste_eur|miles ~ ' €', (r.eur_por_kg|miles(2) ~ ' €/kg') if r.eur_por_kg else 'coste', 'activity') }}
+    {{ kpi((r.co2_kg / 1000)|miles(1) ~ ' t', 'CO₂', 'layers') }}
+    {{ kpi(r.nivel_servicio|pct, 'nivel de servicio', 'check-circle', tono='ok' if r.nivel_servicio and r.nivel_servicio >= r.nivel_servicio_objetivo else 'warn') }}
+  </div>
+  <div class="actions">
+    <a class="btn" href="{{ url_for('plan', semana=semana) }}">{{ icono('map') }}Ver mapa y analítica</a>
+    <form method="post" action="{{ url_for('admin.importar') }}">{{ csrf() }}<input type="hidden" name="semana" value="{{ semana }}">
+      <button class="sec" title="Vuelve a leer code/salidas/{{ semana }}/plan.json">{{ icono('download') }}Reimportar plan</button></form>
+  </div>
+  {% if plan.avisos %}
+  <details class="mt"><summary class="warn" style="cursor:pointer">{{ plan.avisos|length }} avisos del optimizador</summary>
+    <ul class="small">{% for a in plan.avisos %}<li>{{ a.nombre }}: {{ a.motivo }}</li>{% endfor %}</ul></details>{% endif %}
   {% endif %}
 </div>
 
-<div class="card" id="viajes">
-  <h2>3 · Rutas y camiones asignados ({{ viajes|length }})</h2>
-  <p class="muted">Cada ruta se asigna a un camión libre de su base (mismo tipo o, si no hay, otro con capacidad). Se puede cambiar a mano.</p>
-  <div class="scroll"><table>
-    <tr><th>Ruta</th><th>Origen</th><th>Salida → vuelta</th><th>Tipo</th><th class="n">Cajas</th><th class="n">km</th><th class="n">€</th><th>Recorrido</th><th>Camión</th><th>Estado</th></tr>
+{# ------------------------------------------------------------------ 3 · rutas #}
+{% set sin_camion = viajes|selectattr('camion', 'none')|list %}
+<div class="card flush" id="viajes">
+  <div class="card-head">
+    <h2>3 · Rutas y camiones <span class="muted" style="font-weight:500">({{ viajes|length }})</span>
+      {% if sin_camion %}<span class="pill cancelado">{{ sin_camion|length }} sin camión</span>{% endif %}</h2>
+    <div class="search">{{ icono('search') }}<input type="search" placeholder="Buscar ruta, origen, matrícula…" data-filter="#t-viajes" aria-label="Buscar rutas"></div>
+  </div>
+  <p class="small" style="padding:6px 20px 0">Cada ruta recibe un camión libre de su base (mismo tipo o, si no hay, otro con capacidad suficiente). Puedes cambiarlo aquí.</p>
+  <div class="table-wrap"><table id="t-viajes">
+    <thead><tr><th>Ruta</th><th>Salida → vuelta</th><th>Tipo</th><th class="n">Cajas</th><th class="n">km</th><th class="n">€</th><th>Camión</th><th>Estado</th></tr></thead>
+    <tbody>
     {% for v in viajes %}
     {% set flota = (flota_t if v.escalon == 'troncal' else flota_r).get(v.origen, []) %}
-    <tr><td><b>{{ v.nombre }}</b></td><td>{{ v.origen }}</td><td>{{ v.salida }} → {{ v.vuelta }}</td><td>{{ v.tipo_vehiculo }}</td>
+    <tr><td><b>{{ v.nombre }}</b><span class="sub" style="max-width:300px">{{ v.recorrido }}</span></td>
+      <td class="nowrap">{{ v.salida }} → {{ v.vuelta }}</td><td class="nowrap">{{ v.tipo_vehiculo }}<span class="sub">{{ v.operador }}</span></td>
       <td class="n">{{ v.cajas }}</td><td class="n">{{ v.km|miles }}</td><td class="n">{{ v.coste_eur|miles }}</td>
-      <td class="ayuda" style="max-width:260px">{{ v.recorrido }}</td>
       <td>
-        <form method="post" action="{{ url_for('admin.camion_viaje', vid=v.id) }}" class="inline">{{ csrf() }}
-          <select name="camion_id" onchange="this.form.submit()" style="max-width:190px" {{ 'disabled' if v.estado != 'planificado' }}>
+        <form method="post" action="{{ url_for('admin.camion_viaje', vid=v.id) }}" class="inline" data-no-busy>{{ csrf() }}
+          <select name="camion_id" data-autosubmit style="max-width:220px;{{ 'border-color:var(--err)' if not v.camion }}" {{ 'disabled' if v.estado != 'planificado' }} aria-label="Camión de {{ v.nombre }}">
             <option value="">— sin camión —</option>
             {% for c in flota %}<option value="{{ c.id }}" {{ 'selected' if v.camion and v.camion.id == c.id }}>{{ c.matricula }} · {{ c.tipo_vehiculo }} · {{ c.capacidad_cajas }} cj</option>{% endfor %}
           </select>
         </form>
-        {% if not v.camion %}<div class="err ayuda">Sin camión: añade uno en {{ v.origen }}</div>{% endif %}
+        {% if not v.camion %}<span class="sub err">No hay camión libre en {{ v.origen }}</span>{% endif %}
       </td>
       <td>{{ estado(v.estado, ESTADOS_VIAJE) }}</td></tr>
-    {% else %}<tr><td colspan="10" class="muted">Sin rutas: cierra la semana y optimiza.</td></tr>{% endfor %}
+    {% else %}{{ vacio('Sin rutas: cierra la semana y optimiza.', 'route', 8) }}{% endfor %}
+    </tbody>
   </table></div>
 </div>
 
-<div class="card">
-  <h2>4 · Reposiciones planta → almacén ({{ reps|length }})</h2>
-  <div class="scroll"><table>
-    <tr><th>Código</th><th>Planta</th><th>Almacén</th><th>Ruta</th><th class="n">Cajas</th><th class="n">kg</th><th>Estado</th><th>Contenido</th></tr>
-    {% for r in reps %}<tr><td>{{ r.codigo }}</td><td>{{ r.planta_id }}</td><td>{{ r.almacen.nombre }}</td><td>{{ r.viaje.nombre if r.viaje else '—' }}</td>
-      <td class="n">{{ r.cajas }}</td><td class="n">{{ r.kg|miles }}</td><td>{{ estado(r.estado, ESTADOS_REPOSICION) }}</td><td class="ayuda" style="max-width:300px">{{ lineas(r) }}</td></tr>
-    {% else %}<tr><td colspan="8" class="muted">Sin reposiciones.</td></tr>{% endfor %}
+{# ------------------------------------------------------------------ 4 · reposiciones #}
+<div class="card flush">
+  <div class="card-head"><h2>4 · Reposiciones planta → almacén <span class="muted" style="font-weight:500">({{ reps|length }})</span></h2></div>
+  <div class="table-wrap mt"><table>
+    <thead><tr><th>Código</th><th>Planta → almacén</th><th>Ruta</th><th class="n">Cajas</th><th class="n">kg</th><th>Estado</th><th>Contenido</th></tr></thead>
+    <tbody>
+    {% for r in reps %}<tr><td><b>{{ r.codigo }}</b></td><td class="nowrap">{{ r.planta_id }} → {{ r.almacen.provincia }}</td><td>{{ r.viaje.nombre if r.viaje else '—' }}</td>
+      <td class="n">{{ r.cajas }}</td><td class="n">{{ r.kg|miles }}</td><td>{{ estado(r.estado, ESTADOS_REPOSICION) }}</td><td class="small" style="max-width:300px">{{ lineas(r) }}</td></tr>
+    {% else %}{{ vacio('Sin reposiciones.', 'send', 7) }}{% endfor %}
+    </tbody>
   </table></div>
 </div>
 {% endblock %}

@@ -11,6 +11,11 @@ from . import logistica as L
 from .modelos import (FRECUENCIAS, SEGMENTOS, TIPOS_PRENDA, Almacen, Categoria, Pedido, Planta, Reposicion, Tienda,
                       Viaje, db)
 
+
+def _orden(lista_base, valores):
+    """Primero en el orden habitual (Mujer, Hombre, Niños…), luego los que haya añadido el admin."""
+    return [v for v in lista_base if v in valores] + [v for v in valores if v not in lista_base]
+
 bp_tienda = Blueprint("tienda", __name__, url_prefix="/tienda")
 bp_planta = Blueprint("planta", __name__, url_prefix="/planta")
 bp_almacen = Blueprint("almacen", __name__, url_prefix="/almacen")
@@ -22,11 +27,14 @@ def categorias():
 
 
 def matriz(cats):
-    """{segmento: [categoría de cada tipo]} para pintar la tabla segmento × tipo de prenda."""
-    m = {s: [None] * len(TIPOS_PRENDA) for s in SEGMENTOS}
+    """{"tipos": [...], "filas": {segmento: [categoría o None por tipo]}} para la tabla segmento × tipo.
+    Se construye con las categorías que haya en la BD (el admin puede añadir segmentos o tipos nuevos)."""
+    segs = _orden(SEGMENTOS, list(dict.fromkeys(c.segmento for c in cats)))
+    tipos = _orden(TIPOS_PRENDA, list(dict.fromkeys(c.tipo for c in cats)))
+    filas = {s: [None] * len(tipos) for s in segs}
     for c in cats:
-        m[c.segmento][TIPOS_PRENDA.index(c.tipo)] = c
-    return m
+        filas[c.segmento][tipos.index(c.tipo)] = c
+    return {"tipos": tipos, "filas": filas}
 
 
 def leer_lineas(prefijo: str) -> dict[str, int]:
@@ -101,13 +109,21 @@ def tienda_panel(tid):
     media = L.venta_media_diaria(t.id, hoy + dt.timedelta(days=1))
     semana_pasada = L.venta_media_diaria(t.id, hoy + dt.timedelta(days=1), dias=7)
     pedidos = Pedido.query.filter_by(tienda_id=t.id).order_by(Pedido.creado.desc(), Pedido.id.desc()).limit(40).all()
-    cobertura = {c: f"≈ {stock.get(c, 0) / v:.0f} días" for c, v in media.items() if v > 0}
+    umbral = max(3, t.dias_seguridad or 0)
+    cobertura = {}
+    for c, v in media.items():
+        if v > 0:
+            d = stock.get(c, 0) / v
+            cobertura[c] = (f"{d:.0f} días" if d < 99 else "> 99 días", d < umbral)
     return render_template(
         "gestion/tienda.html", t=t, cats=cats, m=matriz(cats), stock=stock, media=media, cobertura=cobertura,
         ventas_7d={k: round(v * 7) for k, v in semana_pasada.items()},
         en_camino=L.en_camino(t.id), propuesta=L.propuesta_automatica(t, hoy), pedidos=pedidos,
         proxima_auto=proxima_fecha_auto(t, hoy), semanas=semanas_abiertas(),
-        alertas=L.alertas("tienda", t.id), hoy=hoy)
+        alertas=L.alertas("tienda", t.id), hoy=hoy,
+        almacenes=Almacen.query.filter_by(activo=True).order_by(Almacen.provincia).all(),
+        por_recibir=[p for p in pedidos if p.estado == "en_reparto"],
+        activos=sum(1 for p in pedidos if p.estado in L.ACTIVOS))
 
 
 @bp_tienda.post("/<tid>/ventas", endpoint="ventas")
@@ -116,7 +132,11 @@ def tienda_panel(tid):
 def tienda_ventas(tid):
     comprobar_acceso("tienda", tid)
     t = db.get_or_404(Tienda, tid)
-    fecha = dt.date.fromisoformat(request.form.get("fecha") or dt.date.today().isoformat())
+    try:
+        fecha = dt.date.fromisoformat(request.form.get("fecha") or dt.date.today().isoformat())
+    except ValueError:
+        flash("Fecha no válida.", "error")
+        return redirect(url_for("tienda.panel", tid=tid))
     if fecha > dt.date.today():
         flash("No se pueden registrar ventas futuras.", "error")
         return redirect(url_for("tienda.panel", tid=tid))
@@ -163,9 +183,22 @@ def tienda_config(tid):
     f = request.form.get("frecuencia_pedido")
     if f not in FRECUENCIAS:
         abort(400)
-    t.frecuencia_pedido = f
-    t.dia_pedido = int(request.form.get("dia_pedido") or 0)
-    t.dias_seguridad = max(0, int(request.form.get("dias_seguridad") or 0))
+    try:
+        dia = int(request.form.get("dia_pedido") or 0)
+        seg = int(request.form.get("dias_seguridad") or 0)
+    except ValueError:
+        flash("El día de pedido y los días de seguridad deben ser números enteros.", "error")
+        return redirect(url_for("tienda.panel", tid=tid))
+    if f == "semanal" and not 0 <= dia <= 6:
+        flash("Para pedido semanal el día va de 0 (lunes) a 6 (domingo).", "error")
+        return redirect(url_for("tienda.panel", tid=tid))
+    if f == "mensual" and not 1 <= dia <= 28:
+        flash("Para pedido mensual el día del mes va de 1 a 28.", "error")
+        return redirect(url_for("tienda.panel", tid=tid))
+    if not 0 <= seg <= 60:
+        flash("Los días de seguridad van de 0 a 60.", "error")
+        return redirect(url_for("tienda.panel", tid=tid))
+    t.frecuencia_pedido, t.dia_pedido, t.dias_seguridad = f, dia, seg
     t.pedido_auto_activo = bool(request.form.get("pedido_auto_activo"))
     db.session.commit()
     flash("Configuración de pedidos automáticos guardada.")
@@ -244,16 +277,21 @@ def almacen_panel(aid):
     comprobar_acceso("almacen", aid)
     a = db.get_or_404(Almacen, aid)
     entrantes = Reposicion.query.filter_by(almacen_id=aid).order_by(Reposicion.semana.desc()).limit(30).all()
-    salientes = (Pedido.query.filter(Pedido.estado.in_(("confirmado", "planificado", "en_reparto", "entregado")))
-                 .filter((Pedido.almacen_id == aid) | ((Pedido.almacen_id.is_(None)) &
-                                                      Pedido.tienda.has(almacen_id=aid)))
+    # el almacén que sirve cada pedido lo decide el optimizador cada semana
+    salientes = (Pedido.query.filter(Pedido.almacen_id == aid,
+                                     Pedido.estado.in_(("confirmado", "planificado", "en_reparto", "entregado")))
                  .order_by(Pedido.semana_entrega.desc(), Pedido.tienda_id).limit(150).all())
+    ultima = db.session.query(db.func.max(Pedido.semana_entrega)).filter(Pedido.almacen_id == aid).scalar()
+    servidas = (Tienda.query.join(Pedido, Pedido.tienda_id == Tienda.id)
+                .filter(Pedido.almacen_id == aid, Pedido.semana_entrega == ultima).distinct().order_by(Tienda.nombre).all()
+                if ultima else [])
     viajes = Viaje.query.filter_by(escalon="reparto", origen=aid).order_by(Viaje.semana.desc(), Viaje.t_salida).limit(40).all()
     previsto_in = sum(r.cajas for r in entrantes if r.estado != "recibida")
     previsto_out = sum(p.cajas for p in salientes if p.estado in ("confirmado", "planificado"))
     return render_template("gestion/almacen.html", a=a, entrantes=entrantes, salientes=salientes, viajes=viajes,
                            previsto_in=previsto_in, previsto_out=previsto_out, alertas=L.alertas("almacen", aid),
-                           tiendas=Tienda.query.filter_by(almacen_id=aid, activa=True).order_by(Tienda.nombre).all())
+                           servidas=servidas, ultima=ultima,
+                           plantas=Planta.query.order_by(Planta.activa.desc(), Planta.id).all())
 
 
 @bp_almacen.post("/<aid>/ajuste", endpoint="ajuste")
@@ -288,7 +326,65 @@ def almacen_recibir(aid, rid):
 def almacen_expedir(aid, pid):
     comprobar_acceso("almacen", aid)
     p = db.get_or_404(Pedido, pid)
-    if (p.almacen_id or p.tienda.almacen_id) != aid:
+    if p.almacen_id != aid:
         abort(404)
     return _accion(lambda: L.expedir_pedido(p, current_user), f"Pedido {p.codigo} cargado en el camión.",
                    url_for("almacen.panel", aid=aid))
+
+
+@bp_almacen.post("/<aid>/viaje/<int:vid>/expedir", endpoint="expedir_viaje")
+@login_required
+@rol_requerido("almacen")
+def almacen_expedir_viaje(aid, vid):
+    """Carga de una vez todos los pedidos de una ruta de reparto."""
+    comprobar_acceso("almacen", aid)
+    v = db.get_or_404(Viaje, vid)
+    if v.origen != aid or v.escalon != "reparto":
+        abort(404)
+    pendientes = Pedido.query.filter_by(viaje_id=v.id, estado="planificado").all()
+    if not pendientes:
+        flash("Esta ruta no tiene pedidos pendientes de cargar.", "error")
+        return redirect(url_for("almacen.panel", aid=aid))
+    cajas = sum(p.cajas for p in pendientes)
+    a = db.session.get(Almacen, aid)
+    if a.stock_cajas < cajas:
+        flash(f"La ruta {v.nombre} necesita {cajas} cajas y el almacén solo tiene {a.stock_cajas}.", "error")
+        return redirect(url_for("almacen.panel", aid=aid))
+    for p in pendientes:
+        L.expedir_pedido(p, current_user)
+    flash(f"Ruta {v.nombre}: {len(pendientes)} pedidos ({cajas} cajas) cargados en el camión.")
+    return redirect(url_for("almacen.panel", aid=aid))
+
+
+# ============================================================================= VETOS
+@bp_tienda.post("/<tid>/vetos", endpoint="vetos")
+@login_required
+@rol_requerido("tienda")
+def tienda_vetos(tid):
+    """La tienda decide de qué almacenes no quiere recibir ropa (por defecto, de ninguno)."""
+    comprobar_acceso("tienda", tid)
+    t = db.get_or_404(Tienda, tid)
+    ids = request.form.getlist("almacenes_vetados")
+    t.almacenes_vetados = Almacen.query.filter(Almacen.id.in_(ids)).all() if ids else []
+    db.session.commit()
+    flash(f"Vetos guardados: {len(ids)} almacén(es) vetado(s). Se aplicarán en la próxima planificación." if ids
+          else "Sin vetos: puedes recibir de cualquier almacén.")
+    _avisar(t_ for _, t_ in L.alertas("tienda", tid) if "vetado" in t_)
+    return redirect(url_for("tienda.panel", tid=tid) + "#vetos")
+
+
+@bp_almacen.post("/<aid>/vetos", endpoint="vetos")
+@login_required
+@rol_requerido("almacen")
+def almacen_vetos(aid):
+    """El almacén decide de qué plantas no quiere recibir ropa (por defecto, de ninguna)."""
+    comprobar_acceso("almacen", aid)
+    a = db.get_or_404(Almacen, aid)
+    ids = request.form.getlist("plantas_vetadas")
+    a.plantas_vetadas = Planta.query.filter(Planta.id.in_(ids)).all() if ids else []
+    db.session.commit()
+    flash(f"Vetos guardados: {len(ids)} planta(s) vetada(s). Se aplicarán en la próxima planificación." if ids
+          else "Sin vetos: puedes recibir de cualquier planta.")
+    if a.sin_planta:
+        flash("Has vetado todas las plantas activas: el almacén no recibirá mercancía.", "error")
+    return redirect(url_for("almacen.panel", aid=aid) + "#vetos")

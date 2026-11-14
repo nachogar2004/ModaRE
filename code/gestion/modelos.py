@@ -111,6 +111,20 @@ class Usuario(UserMixin, db.Model):
 
 
 # ----------------------------------------------------------------------------- red logística
+# Vetos. Por defecto todo almacén recibe de cualquier planta y toda tienda de cualquier almacén;
+# cada almacén puede vetar plantas y cada tienda almacenes de los que no quiere recibir ropa.
+almacen_plantas_vetadas = db.Table(
+    "almacen_plantas_vetadas",
+    db.Column("almacen_id", db.String(24), db.ForeignKey("almacenes.id", ondelete="CASCADE"), primary_key=True),
+    db.Column("planta_id", db.String(16), db.ForeignKey("plantas.id", ondelete="CASCADE"), primary_key=True),
+)
+tienda_almacenes_vetados = db.Table(
+    "tienda_almacenes_vetados",
+    db.Column("tienda_id", db.String(16), db.ForeignKey("tiendas.id", ondelete="CASCADE"), primary_key=True),
+    db.Column("almacen_id", db.String(24), db.ForeignKey("almacenes.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
 class Planta(db.Model):
     __tablename__ = "plantas"
     id = db.Column(db.String(16), primary_key=True)          # PL-MAD
@@ -131,6 +145,8 @@ class Planta(db.Model):
 
     stock = db.relationship("StockPlanta", cascade="all, delete-orphan", lazy="selectin")
     camiones = db.relationship("CamionTroncal", back_populates="planta")
+    vetada_por = db.relationship("Almacen", secondary=almacen_plantas_vetadas, back_populates="plantas_vetadas",
+                                 order_by="Almacen.provincia")      # almacenes que no quieren recibir de ella
 
     @property
     def stock_prendas(self):
@@ -157,17 +173,31 @@ class Almacen(db.Model):
     hora_inicio = db.Column(db.String(5), default="06:00")
     hora_fin = db.Column(db.String(5), default="20:00")
     dias_recepcion = db.Column(db.String(5), default="L-V")
-    planta_id = db.Column(db.String(16), db.ForeignKey("plantas.id"))   # planta que lo repone (último plan)
+    planta_id = db.Column(db.String(16), db.ForeignKey("plantas.id"))   # planta que lo repuso en el último plan
     responsable = db.Column(db.String(120))
     telefono = db.Column(db.String(30))
     activo = db.Column(db.Boolean, default=True, nullable=False)
 
     planta = db.relationship("Planta")
     camiones = db.relationship("CamionReparto", back_populates="almacen")
+    plantas_vetadas = db.relationship("Planta", secondary=almacen_plantas_vetadas, back_populates="vetada_por",
+                                      order_by="Planta.id")
+    vetado_por = db.relationship("Tienda", secondary=tienda_almacenes_vetados, back_populates="almacenes_vetados",
+                                 order_by="Tienda.id")             # tiendas que no quieren recibir de él
 
     @property
     def ocupacion(self):
         return self.stock_cajas / self.stock_max_cajas if self.stock_max_cajas else 0
+
+    @property
+    def plantas_vetadas_txt(self):
+        return ", ".join(p.id for p in self.plantas_vetadas) or "—"
+
+    @property
+    def sin_planta(self) -> bool:
+        """Ha vetado todas las plantas activas: no puede recibir mercancía."""
+        vetadas = {p.id for p in self.plantas_vetadas}
+        return not any(p.activa and p.id not in vetadas for p in Planta.query)
 
 
 class Tienda(db.Model):
@@ -184,7 +214,6 @@ class Tienda(db.Model):
     acceso_carretera = db.Column(db.Boolean, default=True, nullable=False)
     superficie_m2 = db.Column(db.Float)
     categoria_tamano = db.Column(db.String(10), default="mediana")       # pequeña / mediana / grande
-    almacen_id = db.Column(db.String(24), db.ForeignKey("almacenes.id"))  # almacén habitual (provincial)
     ventas_anuales_eur = db.Column(db.Float)
     # recepción de mercancía
     dias_recepcion = db.Column(db.String(5), default="L-V")
@@ -205,8 +234,14 @@ class Tienda(db.Model):
     activa = db.Column(db.Boolean, default=True, nullable=False)
     fecha_alta = db.Column(db.Date, default=dt.date.today)
 
-    almacen = db.relationship("Almacen")
     stock = db.relationship("StockTienda", cascade="all, delete-orphan", lazy="selectin")
+    almacenes_vetados = db.relationship("Almacen", secondary=tienda_almacenes_vetados, back_populates="vetado_por",
+                                        order_by="Almacen.provincia")
+
+    @property
+    def almacenes_vetados_txt(self):
+        n = len(self.almacenes_vetados)
+        return "—" if not n else (self.almacenes_vetados[0].provincia if n == 1 else f"{n} almacenes")
 
     @property
     def stock_prendas(self):

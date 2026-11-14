@@ -1,42 +1,73 @@
 {% extends "base.html" %}
-{% from "gestion/_m.html" import csrf, barra, alertas as alertas_m with context %}
+{% from "gestion/_m.html" import csrf, icono, cabecera, kpi as tarjeta, vacio, estado, medidor, alertas as alertas_m with context %}
+{% block title %}Panel · ReMode Studio{% endblock %}
 {% block body %}
-<h1>Panel de administración</h1>
-<div class="kpis" style="margin-bottom:16px">
-  <div class="kpi"><div class="v">{{ kpi.tiendas }}</div><div class="l">tiendas activas</div></div>
-  <div class="kpi"><div class="v">{{ kpi.plantas }}</div><div class="l">plantas activas</div></div>
-  <div class="kpi"><div class="v">{{ kpi.almacenes }}</div><div class="l">almacenes</div></div>
-  <div class="kpi"><div class="v">{{ kpi.camiones_t }} + {{ kpi.camiones_r }}</div><div class="l">camiones troncal + reparto</div></div>
-  <div class="kpi"><div class="v">{{ kpi.pedidos_sem }}</div><div class="l">pedidos para {{ sem }} ({{ kpi.kg_sem|miles }} kg)</div></div>
-  <div class="kpi"><div class="v">{{ kpi.en_reparto }}</div><div class="l">pedidos en reparto</div></div>
-  <div class="kpi"><div class="v">{{ kpi.stock_almacenes|miles }}</div><div class="l">cajas en almacenes de {{ kpi.max_almacenes|miles }}</div></div>
+{% call cabecera('Panel de control', 'Estado de la red y de la semana ' ~ sem, eyebrow='Administración') %}
+  <form method="post" action="{{ url_for('admin.automaticos') }}">{{ csrf() }}<button class="sec">{{ icono('refresh') }}Generar pedidos automáticos</button></form>
+  <a class="btn" href="{{ url_for('admin.planificacion', semana=sem) }}">{{ icono('calendar') }}Planificar {{ sem }}</a>
+{% endcall %}
+
+<div class="kpis">
+  {{ tarjeta(kpi.pedidos_sem, 'pedidos para ' ~ sem ~ ' · ' ~ kpi.kg_sem|miles ~ ' kg', 'box') }}
+  {{ tarjeta(kpi.en_reparto, 'pedidos en reparto ahora', 'truck') }}
+  {{ tarjeta((kpi.stock_almacenes|miles ~ ' <small>/ ' ~ kpi.max_almacenes|miles ~ '</small>')|safe, 'cajas en almacenes', 'warehouse') }}
+  {{ tarjeta(kpi.tiendas, 'tiendas activas', 'store') }}
+  {{ tarjeta(kpi.plantas ~ ' · ' ~ kpi.almacenes, 'plantas · almacenes', 'factory') }}
+  {{ tarjeta(kpi.camiones_t ~ ' + ' ~ kpi.camiones_r, 'camiones troncal + reparto', 'van') }}
 </div>
 
-<div class="tools">
-  <a class="btn" href="{{ url_for('admin.planificacion', semana=sem) }}">Planificar la semana {{ sem }}</a>
-  <form method="post" action="{{ url_for('admin.automaticos') }}" style="margin:0">{{ csrf() }}<button class="sec">Generar pedidos automáticos pendientes</button></form>
-</div>
-
-<div class="card">
-  <h2>Alertas</h2>
-  {{ alertas_m(alertas) }}{% if not alertas %}<p class="ok">Todo en orden.</p>{% endif %}
-</div>
-
-<div class="row">
+<div class="grid-2">
   <div class="card">
-    <h2>Plantas</h2>
-    <table><tr><th>Planta</th><th class="n">Stock</th><th class="n">Máximo</th><th>Ocupación</th></tr>
-      {% for p in plantas %}<tr><td><a href="{{ url_for('planta.panel', pid=p.id) }}">{{ p.nombre }}</a></td>
-        <td class="n">{{ p.stock_prendas|miles }}</td><td class="n">{{ p.stock_max_prendas|miles }}</td><td>{{ barra(p.ocupacion) }}</td></tr>{% endfor %}
-    </table>
+    <div class="card-head"><h2>Semana {{ sem }}</h2><a href="{{ url_for('admin.planificacion', semana=sem) }}">Ir a planificación {{ icono('arrow-right') }}</a></div>
+    <div class="steps" style="margin-bottom:0">
+      <div class="step {{ 'hecho' if cerrada else 'actual' }}">Recibir pedidos</div>
+      <div class="step {{ 'hecho' if cerrada else '' }}">Cerrar semana</div>
+      <div class="step {{ 'hecho' if hay_plan else ('actual' if cerrada else '') }}">Optimizar rutas</div>
+      <div class="step {{ 'actual' if hay_plan else '' }}">Ejecutar</div>
+    </div>
   </div>
   <div class="card">
-    <h2>Almacenes (más llenos primero)</h2>
-    <div style="max-height:420px;overflow-y:auto">
-    <table><tr><th>Almacén</th><th class="n">Cajas</th><th class="n">Máx.</th><th>Ocupación</th></tr>
-      {% for a in almacenes %}<tr><td><a href="{{ url_for('almacen.panel', aid=a.id) }}">{{ a.provincia }}</a></td>
-        <td class="n">{{ a.stock_cajas }}</td><td class="n">{{ a.stock_max_cajas }}</td><td>{{ barra(a.ocupacion) }}</td></tr>{% endfor %}
+    <div class="card-head"><h2>Alertas</h2>{% if alertas %}<span class="pill cancelado plain">{{ alertas|length }}</span>{% endif %}</div>
+    <div style="max-height:260px;overflow-y:auto">{{ alertas_m(alertas, vacio_ok=True) }}</div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card flush">
+    <div class="card-head"><h2>Plantas</h2><a href="{{ url_for('admin.lista', ent='plantas') }}">Gestionar</a></div>
+    <div class="table-wrap mt"><table>
+      <thead><tr><th>Planta</th><th class="n">Stock</th><th>Ocupación</th></tr></thead>
+      <tbody>
+      {% for p in plantas %}<tr><td><a href="{{ url_for('planta.panel', pid=p.id) }}"><b>{{ p.nombre }}</b></a><span class="sub">{{ p.id }}</span></td>
+        <td class="n">{{ p.stock_prendas|miles }}<span class="sub">de {{ p.stock_max_prendas|miles }}</span></td><td>{{ medidor(p.ocupacion) }}</td></tr>
+      {% else %}{{ vacio('No hay plantas activas.', 'factory', 3) }}{% endfor %}
+      </tbody>
     </table></div>
   </div>
+  <div class="card flush">
+    <div class="card-head"><h2>Pedidos adicionales recientes</h2><a href="{{ url_for('admin.pedidos', tipo='adicional') }}">Ver todos</a></div>
+    <div class="table-wrap mt"><table>
+      <thead><tr><th>Pedido</th><th>Tienda</th><th>Semana</th><th>Estado</th></tr></thead>
+      <tbody>
+      {% for p in adicionales %}<tr><td class="nowrap"><b>{{ p.codigo }}</b>{% if p.urgente %} <span class="pill urgente plain">urgente</span>{% endif %}<span class="sub">{{ p.cajas }} cajas</span></td>
+        <td><a href="{{ url_for('tienda.panel', tid=p.tienda_id) }}">{{ p.tienda.nombre }}</a></td><td class="nowrap">{{ p.semana_entrega }}</td><td>{{ estado(p.estado) }}</td></tr>
+      {% else %}{{ vacio('Ninguna tienda ha hecho pedidos adicionales.', 'box', 4) }}{% endfor %}
+      </tbody>
+    </table></div>
+  </div>
+</div>
+
+<div class="card flush">
+  <div class="card-head"><h2>Almacenes</h2>
+    <div class="search">{{ icono('search') }}<input type="search" placeholder="Buscar provincia…" data-filter="#t-alm" aria-label="Buscar almacenes"></div></div>
+  <div class="table-wrap mt"><table id="t-alm">
+    <thead><tr><th>Almacén</th><th class="n">Cajas</th><th>Ocupación</th><th>Plantas vetadas</th><th>Último plan</th></tr></thead>
+    <tbody>
+    {% for a in almacenes %}<tr><td><a href="{{ url_for('almacen.panel', aid=a.id) }}"><b>{{ a.provincia }}</b></a><span class="sub">{{ a.municipio or a.id }}</span></td>
+      <td class="n">{{ a.stock_cajas }}<span class="sub">de {{ a.stock_max_cajas }}</span></td><td style="min-width:160px">{{ medidor(a.ocupacion) }}</td>
+      <td class="small">{{ a.plantas_vetadas_txt }}</td><td class="small">{{ a.planta_id or '—' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
 </div>
 {% endblock %}

@@ -3,7 +3,7 @@
 Es el ÚNICO módulo de la app que conoce la librería. Si se sustituye por otra versión, basta con
 adaptar estas tres funciones:
 
-  exportar_maestros()   BD -> data/tiendas.csv, plantas.csv, almacenes.csv  (lo que lee la librería)
+  exportar_maestros()   BD -> data/tiendas.csv, plantas.csv, almacenes.csv y vetos_*.csv  (lo que lee la librería)
   lanzar(semana, ...)   ejecuta la optimización en segundo plano (escribe code/salidas/<semana>/)
   importar_plan(semana) code/salidas/<semana>/plan.json -> viajes, camiones asignados, reposiciones
 
@@ -94,6 +94,20 @@ def exportar_maestros():
             f.update(en_muestra=0, ubicacion_etiqueta=ETIQUETA_APP, recepcion_etiqueta=ETIQUETA_APP,
                      ventas_etiqueta=ETIQUETA_APP, periodo_ventas="anual")
     _sincronizar_csv("tiendas.csv", "id_tienda", filas)
+    exportar_vetos()
+
+
+def exportar_vetos():
+    """data/vetos_almacen_planta.csv y data/vetos_tienda_almacen.csv: lo que cada almacén y cada tienda ha
+    vetado. La asignación de la librería lo respeta; todo lo demás está permitido."""
+    vetos = {
+        "vetos_almacen_planta.csv": (["id_almacen", "id_planta"],
+                                     sorted((a.id, p.id) for a in Almacen.query for p in a.plantas_vetadas)),
+        "vetos_tienda_almacen.csv": (["id_tienda", "id_almacen"],
+                                     sorted((t.id, a.id) for t in Tienda.query for a in t.almacenes_vetados)),
+    }
+    for fichero, (cols, filas) in vetos.items():
+        pd.DataFrame(filas, columns=cols).to_csv(C.DATA_DIR / fichero, index=False, encoding="utf-8")
 
 
 # ----------------------------------------------------------------------------- 2. ejecutar

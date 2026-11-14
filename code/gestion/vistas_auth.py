@@ -39,6 +39,12 @@ def salir():
 @login_required
 def cuenta():
     if request.method == "POST":
+        if request.form.get("accion") == "datos":
+            current_user.nombre = (request.form.get("nombre") or "").strip() or None
+            current_user.email = (request.form.get("email") or "").strip() or None
+            db.session.commit()
+            flash("Datos guardados.")
+            return redirect(url_for("auth.cuenta"))
         actual, nueva = request.form.get("actual", ""), request.form.get("nueva", "")
         if not current_user.check_password(actual):
             flash("La contraseña actual no es correcta.", "error")
@@ -48,9 +54,7 @@ def cuenta():
             flash("Las contraseñas no coinciden.", "error")
         else:
             current_user.set_password(nueva)
-            current_user.nombre = request.form.get("nombre") or current_user.nombre
-            current_user.email = request.form.get("email") or current_user.email
             db.session.commit()
-            flash("Datos actualizados.")
+            flash("Contraseña cambiada.")
         return redirect(url_for("auth.cuenta"))
     return render_template("gestion/cuenta.html")

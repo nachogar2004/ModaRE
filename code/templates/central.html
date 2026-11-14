@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block body %}
-<h1>Central · semana {{ semana }}</h1>
+<div class="page-head"><div><div class="eyebrow">Herramienta avanzada</div><h1>Optimizador · semana {{ semana }}</h1><div class="sub">Escenarios con demanda estimada o mixta. Para la operación normal usa <a href="{{ url_for('admin.planificacion', semana=semana) }}">Planificación</a>.</div></div></div>
 <div class="row">
   <div class="card">
     <h2>Generar rutas</h2>

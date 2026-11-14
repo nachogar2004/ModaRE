@@ -1,44 +1,89 @@
 {% extends "base.html" %}
-{% from "gestion/_m.html" import csrf with context %}
+{% from "gestion/_m.html" import csrf, icono, cabecera with context %}
+{% block title %}{{ 'Nuevo' if alta else 'Editar' }} {{ e.singular }} · ReMode Studio{% endblock %}
 {% block body %}
-<h1>{{ 'Nuevo' if alta else 'Editar' }} {{ e.singular }}{% if not alta %} · {{ obj.id }}{% endif %}</h1>
-<p><a href="{{ url_for('admin.lista', ent=ent) }}">← Volver a {{ e.titulo|lower }}</a></p>
-<div class="card">
-<form method="post">{{ csrf() }}
-  <div class="formgrid">
-  {% for c in e.campos %}
-    {% if not (c.solo_alta and not alta) %}
-    {% set v = form.get(c.nombre) if form else (obj[c.nombre] if c.tipo != 'password' else '') %}
-    <div>
-      {% if c.tipo == 'bool' %}
-        {% set marcado = (c.nombre in form) if form else (v if not alta else true) %}
-        <label><input type="checkbox" name="{{ c.nombre }}" {{ 'checked' if marcado }}> {{ c.etiqueta }}</label>
-      {% else %}
-        <label>{{ c.etiqueta }}{% if c.requerido %} *{% endif %}</label>
-        {% if c.tipo == 'select' %}
-          <select name="{{ c.nombre }}">
-            {% if not c.requerido %}<option value="">—</option>{% endif %}
-            {% for k, t in c.opciones() %}<option value="{{ k }}" {{ 'selected' if v is not none and k|string == v|string }}>{{ t }}</option>{% endfor %}
-          </select>
-        {% elif c.tipo == 'textarea' %}
-          <textarea name="{{ c.nombre }}" rows="2">{{ v or '' }}</textarea>
+<p class="mb0"><a href="{{ url_for('admin.lista', ent=ent) }}">{{ icono('arrow-left') }} {{ e.titulo }}</a></p>
+{% call cabecera(('Nueva ' if e.singular in ('tienda', 'planta', 'categoría') else 'Nuevo ') ~ e.singular if alta else (obj.nombre or obj.matricula or obj.username or obj.id), None if alta else e.singular|capitalize ~ ' · ' ~ obj.id) %}
+  {% if not alta and e.enlace %}<a class="btn sec" href="{{ e.enlace(obj) }}">Ver panel {{ icono('arrow-right') }}</a>{% endif %}
+{% endcall %}
+
+<form method="post" id="ficha">{{ csrf() }}
+  {% for titulo, campos in secciones %}
+  <div class="card">
+    {% if titulo %}<h2>{{ titulo }}</h2>{% endif %}
+    <div class="formgrid">
+    {% for c in campos %}
+      {% if not (c.solo_alta and not alta) %}
+      {% set v = form.get(c.nombre) if form else (obj[c.nombre] if c.tipo != 'password' else '') %}
+      <div {% if c.nombre in ('tienda_id', 'planta_id', 'almacen_id') and ent == 'usuarios' %}data-por-rol="{{ c.nombre[:-3] }}"{% endif %}
+           {% if c.tipo in ('multi', 'textarea') %}style="grid-column:1/-1"{% endif %}>
+        {% if c.tipo == 'multi' %}
+          {% set marcados = form.getlist(c.nombre) if form else (obj[c.nombre]|map(attribute='id')|list if not alta else []) %}
+          <div class="actions" style="margin-bottom:8px">
+            <button type="button" class="ghost sm" data-check-all="{{ c.nombre }}" data-valor="1">Marcar todas</button>
+            <button type="button" class="ghost sm" data-check-all="{{ c.nombre }}" data-valor="0">Ninguna</button>
+          </div>
+          <div class="checks">
+          {% for k, t in c.opciones() %}
+            <label class="check"><input type="checkbox" name="{{ c.nombre }}" value="{{ k }}" {{ 'checked' if k in marcados }}> {{ t }}</label>
+          {% endfor %}
+          </div>
+        {% elif c.tipo == 'bool' %}
+          {% set marcado = (c.nombre in form) if form else (v if not alta else true) %}
+          <label>&nbsp;</label>
+          <label class="check"><input type="checkbox" name="{{ c.nombre }}" {{ 'checked' if marcado }}> {{ c.etiqueta }}</label>
         {% else %}
-          <input name="{{ c.nombre }}" value="{{ v if v is not none else '' }}"
-                 type="{{ {'int': 'number', 'float': 'text', 'date': 'date', 'password': 'password', 'time': 'time'}.get(c.tipo, 'text') }}"
-                 {% if c.tipo == 'float' %}inputmode="decimal"{% endif %}
-                 {% if c.requerido and c.tipo != 'password' %}required{% endif %}
-                 {% if c.tipo == 'password' %}autocomplete="new-password"{% endif %}>
+          <label for="f-{{ c.nombre }}">{{ c.etiqueta }}{% if c.requerido %} <span class="err">*</span>{% endif %}</label>
+          {% if c.tipo == 'select' %}
+            <select id="f-{{ c.nombre }}" name="{{ c.nombre }}">
+              {% if not c.requerido %}<option value="">—</option>{% endif %}
+              {% for k, t in c.opciones() %}<option value="{{ k }}" {{ 'selected' if v is not none and k|string == v|string }}>{{ t }}</option>{% endfor %}
+            </select>
+          {% elif c.tipo == 'textarea' %}
+            <textarea id="f-{{ c.nombre }}" name="{{ c.nombre }}" rows="3">{{ v or '' }}</textarea>
+          {% else %}
+            {% if v is float and v == v|int and c.tipo == 'float' %}{% set v = v|int %}{% endif %}
+            <input id="f-{{ c.nombre }}" name="{{ c.nombre }}" value="{{ v if v is not none else '' }}"
+                   type="{{ {'int': 'number', 'float': 'text', 'date': 'date', 'password': 'password', 'time': 'time'}.get(c.tipo, 'text') }}"
+                   {% if c.tipo == 'float' %}inputmode="decimal"{% endif %}
+                   {% if c.requerido and c.tipo != 'password' %}required{% endif %}
+                   {% if c.tipo == 'password' %}autocomplete="new-password"{% if alta %} required{% endif %}{% endif %}>
+          {% endif %}
         {% endif %}
+        {% if c.ayuda %}<div class="ayuda">{{ c.ayuda }}</div>{% endif %}
+      </div>
       {% endif %}
-      {% if c.ayuda %}<div class="ayuda">{{ c.ayuda }}</div>{% endif %}
+    {% endfor %}
     </div>
-    {% endif %}
-  {% endfor %}
   </div>
-  {% if alta and ent in ('tiendas', 'plantas', 'almacenes') %}
-  <p class="muted">Se creará también su usuario de acceso con una contraseña aleatoria (se muestra una vez).</p>
-  {% endif %}
-  <p><button>Guardar</button></p>
+  {% endfor %}
+
+  <div class="card" style="position:sticky;bottom:12px;z-index:5;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:14px 20px">
+    <button>{{ icono('check') }}{{ 'Crear' if alta else 'Guardar cambios' }}</button>
+    <a class="btn ghost" href="{{ url_for('admin.lista', ent=ent) }}">Cancelar</a>
+    {% if alta and ent in ('tiendas', 'plantas', 'almacenes') %}
+    <span class="small">Se creará también su usuario de acceso con una contraseña aleatoria (se muestra una sola vez).</span>
+    {% endif %}
+    {% if not alta %}<span class="right"></span>
+    <button type="submit" form="borrar" class="danger">{{ icono('trash') }}Eliminar</button>{% endif %}
+  </div>
 </form>
-</div>
+{% if not alta %}
+<form id="borrar" method="post" action="{{ url_for('admin.borrar', ent=ent, oid=oid) }}"
+      data-confirm="¿Eliminar {{ e.singular }} {{ obj.id }}? Si tiene historial se dará de baja y se conservará.">{{ csrf() }}</form>
+{% endif %}
+
+{% if ent == 'usuarios' %}
+<script>
+  /* solo se ve la tienda/planta/almacén que corresponde al rol elegido */
+  (function () {
+    const rol = document.getElementById("f-rol");
+    const pintar = () => document.querySelectorAll("[data-por-rol]").forEach(d => {
+      const ok = d.dataset.porRol === rol.value;
+      d.hidden = !ok; d.querySelector("select").disabled = !ok;
+    });
+    rol.addEventListener("change", pintar); pintar();
+  })();
+</script>
+{% endif %}
 {% endblock %}

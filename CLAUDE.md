@@ -38,6 +38,7 @@ Todos los CSV llevan columnas `etiqueta` (REAL / ESTIMADO / SINTÉTICO) y `fuent
 | `tarifas.csv` | Operador A (€/km + €/h, ilimitado) y B (€/día + €/km, unidades limitadas) | |
 | `distancias.csv` | matriz completa **por carretera (OSRM)** entre plantas, almacenes y tiendas: km, min de coche y min de camión (×`factor_tiempo_camion`) | 219 puntos, 47.742 pares, islas no incluidas. Se regenera con `code/calcular_distancias.py` (~30 s); hay que repetirlo si se mueven/añaden almacenes, plantas o tiendas. Si a un par le falta dato se usa línea recta × `factor_rodeo` |
 | `geometrias_osrm.json` | caché de trazados por carretera de cada tramo (polyline) para el mapa | se rellena sola al guardar un plan |
+| `vetos_almacen_planta.csv`, `vetos_tienda_almacen.csv` | vetos (`id_almacen,id_planta` / `id_tienda,id_almacen`): de dónde NO quiere recibir cada almacén / tienda; los escribe la app al optimizar | opcionales: sin fichero no hay vetos. Todo almacén puede recibir de cualquier planta y toda tienda de cualquier almacén |
 | `parametros.csv` | todos los supuestos de negocio (kg/palé, frecuencias, jornada, días máx. de ruta, `tipos_troncal`…) | **cambiad aquí los supuestos, no en el código** |
 
 Demanda por defecto (si la tienda no pide): `kg_semana = ventas / precio_medio_eur_kg / semanas_venta_anio`
@@ -52,7 +53,8 @@ Descomposición *cluster-first, route-second* en dos escalones, todo con OR-Tool
 min  Σ c_rep · km(a,s) · kg_s · x[s,a]  +  Σ c_tro · km(p,a) · f[a,p]
 s.a. Σ_a x[s,a] = 1                        cada tienda la sirve un almacén (de sus 5 más cercanos)
      Σ_s kg_s · x[s,a] ≤ capacidad_a        capacidad semanal del almacén
-     Σ_p y[a,p] ≤ 1                         cada almacén lo repone una sola planta
+     Σ_p y[a,p] ≤ 1                         cada almacén lo repone una sola planta (no vetada: vetos_almacen_planta.csv)
+     x[s,a] = 0 si la tienda veta el almacén (vetos_tienda_almacen.csv); tiendas que vetan todos -> aviso, sin servir
      Σ_p f[a,p] = Σ_s kg_s · x[s,a]         conservación del flujo;  f[a,p] ≤ cap_a · y[a,p]
      Σ_a f[a,p] ≤ capacidad_p               capacidad de salida semanal de la planta (solo activas)
 ```
@@ -116,6 +118,8 @@ code/
   modare/osrm.py      cliente OSRM: matriz de distancias y trazados de rutas (1 petición/s, con caché)
   calcular_distancias.py  regenera data/distancias.csv por carretera
   templates/          HTML de la app (Leaflet para el mapa); templates/gestion/ = pantallas de la app de gestión
+  static/             remode.css (diseño vaquero del logo: tokens claro/oscuro, costuras, componentes) y remode.js (pestañas, filtros, totales en vivo, avisos)
+  static/marca/       logo RMS sin fondo (webp) e icono camiseta-R (png). Original y script que los genera en docs/marca/
 ```
 
 ### Salidas (`code/salidas/<semana>/`, se sobrescriben en cada ejecución de esa semana)
@@ -167,7 +171,7 @@ La primera ejecución tarda ~1 min más porque pide a OSRM el trazado de cada ru
 escalones **no incluye operar los almacenes** (manipulación, alquiler, personal), que hoy vale 0; y los camiones
 físicos del reparto se cuentan por almacén (cada almacén necesita al menos uno).
 
-## App de gestión (`code/gestion/`, BD `code/gestion.db`)
+## App de gestión «ReMode Studio» (`code/gestion/`, BD `code/gestion.db`)
 
 Aplicación web con login por roles sobre la misma app Flask. La BD (SQLite, SQLAlchemy) se crea y se rellena
 sola desde `data/*.csv` la primera vez que se arranca `app.py` (`gestion/semilla.py`).
@@ -178,6 +182,10 @@ sola desde `data/*.csv` la primera vez que se arranca `app.py` (`gestion/semilla
 | **Planta** | `pl-mad`… | Stock en prendas por categoría y **stock máximo**; entradas de clasificación; **expide** las reposiciones a almacenes (descuenta stock); sus camiones troncales y rutas |
 | **Almacén** | `al-madrid`… | Stock en **cajas mixtas** frente a su **máximo** (alerta si lo supera, también con lo previsto); **recibe** reposiciones; **carga** los pedidos de tienda en el camión de reparto |
 | **Admin** | `admin` | Todo: alta/baja/edición de usuarios, tiendas, plantas, almacenes, camiones troncales, camiones de reparto y categorías; ve pedidos, movimientos de stock y alertas; planificación semanal |
+
+Guía de uso completa: [docs/guia_app.md](docs/guia_app.md). No hay asociaciones fijas tienda→almacén ni almacén→planta: el optimizador decide cada semana.
+Solo hay **vetos** (tablas `almacen_plantas_vetadas` y `tienda_almacenes_vetados`), que deciden la tienda y el almacén en su panel;
+se exportan a `data/vetos_*.csv` y la asignación los respeta.
 
 Contraseñas iniciales: `admin`/`admin` y `modare2026` para el resto (variables `MODARE_PASSWORD_ADMIN`,
 `MODARE_PASSWORD_INICIAL`; `MODARE_SECRET_KEY` para la sesión). Al dar de alta una tienda/planta/almacén se crea

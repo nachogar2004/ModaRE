@@ -1,13 +1,39 @@
 {% extends "base.html" %}
-{% block title %}Entrar · Moda re-{% endblock %}
-{% block body %}
-<div class="card" style="max-width:420px;margin:40px auto">
-  <h1>Iniciar sesión</h1>
-  <p class="muted">Tiendas, plantas, almacenes y administración de la red de transporte.</p>
-  <form method="post">
-    <label>Usuario</label><input name="username" autofocus autocomplete="username" placeholder="td-001, pl-mad, al-madrid, admin">
-    <label>Contraseña</label><input type="password" name="password" autocomplete="current-password">
-    <p><button>Entrar</button></p>
-  </form>
+{% block title %}Entrar · ReMode Studio{% endblock %}
+{% block layout %}
+<div class="login">
+  <section class="login-art">
+    <div class="etiqueta cosido">
+      <img src="{{ url_for('static', filename='marca/logo_rms.webp') }}" alt="RMS · ReMode Studio" width="900" height="420">
+    </div>
+    <div>
+      <h2>La ropa que vuelve a circular, bien repartida.</h2>
+      <p>Stock, pedidos y rutas de toda la red en un mismo sitio: cada tienda pide lo que vende,
+         la central planifica la semana y cada camión sabe dónde ir.</p>
+      <div class="flujo">
+        <span><svg class="i"><use href="#i-factory"/></svg>Planta</span>
+        <svg class="i"><use href="#i-arrow-right"/></svg>
+        <span><svg class="i"><use href="#i-warehouse"/></svg>Almacén</span>
+        <svg class="i"><use href="#i-arrow-right"/></svg>
+        <span><svg class="i"><use href="#i-store"/></svg>Tienda</span>
+      </div>
+    </div>
+  </section>
+  <section class="login-form">
+    <div class="box">
+      <div class="nombre">ReMode Studio</div>
+      <h1>Iniciar sesión</h1>
+      <p class="muted">Accede con el usuario de tu tienda, planta, almacén o de administración.</p>
+      <form method="post" data-no-busy>
+        <label for="u">Usuario</label>
+        <input id="u" name="username" autofocus autocomplete="username" autocapitalize="none" spellcheck="false"
+               placeholder="td-001, pl-mad, al-madrid…" required>
+        <label for="p">Contraseña</label>
+        <input id="p" type="password" name="password" autocomplete="current-password" required>
+        <button>Entrar <svg class="i"><use href="#i-arrow-right"/></svg></button>
+      </form>
+      <p class="small mt">¿Has olvidado la contraseña? Pide al administrador que te asigne una nueva.</p>
+    </div>
+  </section>
 </div>
 {% endblock %}

@@ -65,6 +65,9 @@ class Datos:
     km: dict = field(repr=False)   # (origen, destino) -> km
     mins: dict = field(repr=False) # (origen, destino) -> min de camión (sin pausas)
     coords: dict = field(repr=False)
+    # vetos (data/vetos_*.csv): por defecto todo almacén recibe de cualquier planta y toda tienda de cualquier almacén
+    plantas_vetadas: dict = field(default_factory=dict, repr=False)     # almacén -> {plantas que no quiere}
+    almacenes_vetados: dict = field(default_factory=dict, repr=False)   # tienda  -> {almacenes que no quiere}
 
     def dist(self, a: str, b: str) -> tuple[float, float]:
         """km y minutos de conducción de camión. Respaldo: línea recta × factor_rodeo."""
@@ -132,7 +135,21 @@ def cargar_datos() -> Datos:
     coords = {r.id_planta: (r.lat, r.lon) for r in plantas.itertuples()}
     coords.update({r.id_almacen: (r.lat, r.lon) for r in almacenes.itertuples()})
     coords.update({r.id_tienda: (r.lat, r.lon) for r in tiendas.itertuples()})
-    return Datos(P, plantas, almacenes, tiendas, tipos, tarifas, km, mins, coords)
+    return Datos(P, plantas, almacenes, tiendas, tipos, tarifas, km, mins, coords,
+                 _cargar_vetos("vetos_almacen_planta.csv", "id_almacen", "id_planta"),
+                 _cargar_vetos("vetos_tienda_almacen.csv", "id_tienda", "id_almacen"))
+
+
+def _cargar_vetos(fichero: str, col_quien: str, col_vetado: str) -> dict[str, set[str]]:
+    """Fichero de vetos opcional (p. ej. vetos_almacen_planta.csv: id_almacen, id_planta).
+    Cada fila = «quien» no quiere recibir de «vetado». Si el fichero no existe, no hay vetos."""
+    f = C.DATA_DIR / fichero
+    if not f.exists():
+        return {}
+    out: dict[str, set[str]] = {}
+    for q, v in pd.read_csv(f, encoding="utf-8")[[col_quien, col_vetado]].itertuples(index=False):
+        out.setdefault(q, set()).add(v)
+    return out
 
 
 # ----------------------------------------------------------------------------- demanda

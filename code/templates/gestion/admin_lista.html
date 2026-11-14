@@ -1,49 +1,57 @@
 {% extends "base.html" %}
-{% from "gestion/_m.html" import csrf, estado, barra with context %}
+{% from "gestion/_m.html" import csrf, icono, cabecera, vacio, estado, medidor with context %}
+{% block title %}{{ e.titulo }} · ReMode Studio{% endblock %}
 {% block body %}
-<h1>{{ e.titulo }} <span class="muted" style="font-size:15px">({{ filas|length }})</span></h1>
-<div class="tools">
-  <a class="btn" href="{{ url_for('admin.editar', ent=ent) }}">+ Añadir {{ e.singular }}</a>
-  {% if e.filtros %}
-  <form method="get" class="tools" style="margin:0">
-    <input name="q" value="{{ filtro }}" placeholder="Buscar…">
-    {% if request.args.get('todos') %}<input type="hidden" name="todos" value="1">{% endif %}
-    <button class="sec">Buscar</button>
-  </form>{% endif %}
-  {% if e.activo %}
-    {% if request.args.get('todos') %}<a href="{{ url_for('admin.lista', ent=ent, q=filtro) }}">Ocultar los dados de baja</a>
-    {% else %}<a href="{{ url_for('admin.lista', ent=ent, q=filtro, todos=1) }}">Mostrar también los dados de baja</a>{% endif %}
-  {% endif %}
+{% call cabecera(e.titulo, eyebrow='Administración') %}
   {% if ent in ('tiendas', 'plantas', 'almacenes') %}
-  <form method="post" action="{{ url_for('admin.exportar') }}" style="margin:0">{{ csrf() }}
-    <button class="sec" title="Escribe data/*.csv para la librería de rutas">Exportar a la librería de rutas</button></form>
+  <form method="post" action="{{ url_for('admin.exportar') }}">{{ csrf() }}
+    <button class="sec" title="Escribe data/*.csv para la librería de rutas">{{ icono('download') }}Exportar a la librería de rutas</button></form>
   {% endif %}
-</div>
-<div class="card scroll">
-<table>
-  <tr>{% for a, h in e.columnas %}<th>{{ h }}</th>{% endfor %}<th></th></tr>
-  {% for o in filas %}
-  {% set oid = o.id %}
-  <tr>
-    {% for a, h in e.columnas %}{% set v = o[a] %}
-    <td>
-      {% if a == 'ocupacion' %}{{ v|pct }}{{ barra(v) }}
-      {% elif v is sameas true %}✓{% elif v is sameas false %}<span class="err">✗</span>
-      {% elif a == 'estado' %}{{ estado(v, ESTADOS_CAMION) }}
-      {% elif a == 'rol' %}{{ ROLES[v] }}
-      {% elif v is number %}{{ v|miles(2 if v is float and v < 10 else 0) }}
-      {% elif loop.first and e.enlace %}<a href="{{ e.enlace(o) }}">{{ v }}</a>
-      {% else %}{{ v if v is not none else '—' }}{% endif %}
-    </td>
-    {% endfor %}
-    <td style="white-space:nowrap">
-      <a href="{{ url_for('admin.editar', ent=ent, oid=oid) }}">Editar</a>
-      <form class="inline" method="post" action="{{ url_for('admin.borrar', ent=ent, oid=oid) }}"
-            onsubmit="return confirm('¿Eliminar {{ e.singular }} {{ oid }}? Si tiene historial se dará de baja.')">{{ csrf() }}
-        <button class="sec">Eliminar</button></form>
-    </td>
-  </tr>
-  {% endfor %}
-</table>
+  <a class="btn" href="{{ url_for('admin.editar', ent=ent) }}">{{ icono('plus') }}Añadir {{ e.singular }}</a>
+{% endcall %}
+
+<div class="card flush">
+  <div class="card-head">
+    <div class="search">{{ icono('search') }}<input type="search" value="{{ filtro }}" placeholder="Buscar en {{ e.titulo|lower }}…" data-filter="#t-lista" data-count="#n-lista" aria-label="Buscar"></div>
+    <div class="actions">
+      <span class="small"><b id="n-lista">{{ filas|length }}</b> de {{ filas|length }}</span>
+      {% if e.activo %}
+        {% if request.args.get('todos') %}<a class="btn ghost sm" href="{{ url_for('admin.lista', ent=ent) }}">Ocultar dados de baja</a>
+        {% else %}<a class="btn ghost sm" href="{{ url_for('admin.lista', ent=ent, todos=1) }}">Mostrar dados de baja</a>{% endif %}
+      {% endif %}
+    </div>
+  </div>
+  <div class="table-wrap mt"><table id="t-lista">
+    <thead><tr>{% for a, h in e.columnas %}<th class="{{ 'n' if a in ('stock_prendas', 'stock_max_prendas', 'capacidad_salida_kg_semana', 'stock_cajas', 'stock_max_cajas', 'capacidad_cajas', 'carga_util_kg', 'kg_unidad', 'precio_unidad', 'cuota_ventas') }}">{{ h }}</th>{% endfor %}<th></th></tr></thead>
+    <tbody>
+    {% for o in filas %}
+    {% set oid = o.id %}
+    {% set de_baja = (e.activo and not o[e.activo]) or (o.estado is defined and o.estado == 'baja') %}
+    <tr {% if de_baja %}style="opacity:.6"{% endif %}>
+      {% for a, h in e.columnas %}{% set v = o[a] %}
+      <td class="{{ 'n' if v is number and v is not sameas true and v is not sameas false and a != 'ocupacion' }} {{ 'nowrap' if loop.first }}">
+        {% if a == 'ocupacion' %}<div style="min-width:130px">{{ medidor(v) }}</div>
+        {% elif a in ('activa', 'activo') %}<span class="pill {{ 'activo' if v else 'inactivo' }}">{{ 'Activa' if v and a == 'activa' else ('Activo' if v else 'De baja') }}</span>
+        {% elif v is sameas true %}{{ icono('check') }}{% elif v is sameas false %}<span class="muted">—</span>
+        {% elif a == 'estado' %}{{ estado(v, ESTADOS_CAMION) }}
+        {% elif a == 'rol' %}<span class="pill plain">{{ ROLES[v] }}</span>
+        {% elif a == 'frecuencia_pedido' %}{{ FRECUENCIAS.get(v, v) }}
+        {% elif a == 'ultimo_acceso' %}{{ v.strftime('%d/%m/%Y %H:%M') if v else 'nunca' }}
+        {% elif v is number %}{{ v|miles(2 if v is float and v < 10 else 0) }}
+        {% elif loop.first and e.enlace %}<a href="{{ e.enlace(o) }}"><b>{{ v }}</b></a>
+        {% elif loop.first %}<b>{{ v }}</b>
+        {% else %}{{ v if v is not none and v != '' else '—' }}{% endif %}
+      </td>
+      {% endfor %}
+      <td class="act">
+        <a class="btn ghost sm" href="{{ url_for('admin.editar', ent=ent, oid=oid) }}" title="Editar">{{ icono('edit') }}<span class="sr-only">Editar</span></a>
+        <form class="inline" method="post" action="{{ url_for('admin.borrar', ent=ent, oid=oid) }}"
+              data-confirm="¿Eliminar {{ e.singular }} {{ oid }}? Si tiene historial se dará de baja y se conservará.">{{ csrf() }}
+          <button class="danger sm" title="Eliminar">{{ icono('trash') }}<span class="sr-only">Eliminar</span></button></form>
+      </td>
+    </tr>
+    {% else %}{{ vacio('No hay ' ~ e.titulo|lower ~ ' que mostrar.', 'inbox', e.columnas|length + 1) }}{% endfor %}
+    </tbody>
+  </table></div>
 </div>
 {% endblock %}

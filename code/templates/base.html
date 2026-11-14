@@ -3,86 +3,93 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Moda re- · Reparto{% endblock %}</title>
-<style>
-  :root { --bg:#f6f5f2; --card:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#e3e1db; --acc:#0f766e; --acc-2:#ccfbf1; --warn:#b45309; --err:#b91c1c; }
-  * { box-sizing: border-box; }
-  body { margin:0; font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
-  header { background:var(--ink); color:#fff; padding:12px 20px; display:flex; gap:24px; align-items:center; flex-wrap:wrap; }
-  header b { font-size:17px; } header a { color:#d6d3d1; text-decoration:none; } header a.on { color:#fff; border-bottom:2px solid var(--acc-2); }
-  main { max-width:1200px; margin:0 auto; padding:20px 16px 60px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; margin-bottom:16px; }
-  h1 { font-size:22px; margin:0 0 12px; } h2 { font-size:17px; margin:0 0 10px; }
-  label { display:block; font-weight:600; margin:10px 0 4px; }
-  input, select, textarea { font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:6px; width:100%; max-width:420px; background:#fff; }
-  button, .btn { font:inherit; background:var(--acc); color:#fff; border:0; border-radius:6px; padding:9px 16px; cursor:pointer; text-decoration:none; display:inline-block; }
-  button.sec { background:#e7e5e4; color:var(--ink); }
-  table { width:100%; border-collapse:collapse; font-size:14px; }
-  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { color:var(--muted); font-weight:600; }
-  td.n, th.n { text-align:right; font-variant-numeric:tabular-nums; }
-  .muted { color:var(--muted); } .ok { color:var(--acc); } .warn { color:var(--warn); } .err { color:var(--err); }
-  .flash { padding:10px 14px; border-radius:8px; background:var(--acc-2); margin-bottom:14px; }
-  .flash.error { background:#fee2e2; }
-  .kpis { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
-  .kpi { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; }
-  .kpi .v { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; } .kpi .l { color:var(--muted); font-size:13px; }
-  .row { display:flex; gap:16px; flex-wrap:wrap; } .row > * { flex:1 1 280px; }
-  .scroll { overflow-x:auto; }
-  .pill { display:inline-block; padding:1px 8px; border-radius:99px; background:#eee; font-size:12px; }
-  header { gap:16px; } header .sp { flex:1; } header button.link { background:none; color:#d6d3d1; padding:0; }
-  .bar { height:8px; background:#e7e5e4; border-radius:99px; overflow:hidden; min-width:80px; }
-  .bar > i { display:block; height:100%; background:var(--acc); }
-  .bar.warn > i { background:var(--warn); } .bar.err > i { background:var(--err); }
-  .pill.pendiente { background:#fef3c7; } .pill.confirmado { background:#e0e7ff; } .pill.planificado, .pill.planificada { background:#dbeafe; }
-  .pill.en_reparto, .pill.expedida, .pill.en_curso, .pill.en_ruta { background:#ffedd5; }
-  .pill.entregado, .pill.recibida, .pill.completado, .pill.disponible { background:var(--acc-2); }
-  .pill.cancelado, .pill.baja { background:#fee2e2; } .pill.mantenimiento { background:#fef3c7; }
-  .pill.adicional { background:#fae8ff; } .pill.automatico { background:#e0f2fe; }
-  table.grid input { width:72px; padding:4px 6px; text-align:right; }
-  table.grid td, table.grid th { text-align:right; } table.grid td:first-child, table.grid th:first-child { text-align:left; }
-  details.card > summary { cursor:pointer; font-weight:700; font-size:16px; }
-  details.card[open] > summary { margin-bottom:10px; }
-  .alerta { padding:8px 12px; border-radius:8px; margin-bottom:6px; background:#fef3c7; }
-  .alerta.err { background:#fee2e2; color:var(--err); }
-  .inline { display:inline; } .inline button { padding:4px 10px; font-size:13px; }
-  .formgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:0 18px; }
-  .ayuda { font-size:12px; color:var(--muted); margin-top:2px; }
-  input[type=checkbox] { width:auto; }
-  .tools { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px; }
-  .tools input, .tools select { width:auto; }
-</style>
+<title>{% block title %}ReMode Studio{% endblock %}</title>
+<link rel="icon" type="image/png" href="{{ url_for('static', filename='marca/icono_rms_64.png') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='marca/icono_rms_192.png') }}">
+<meta name="theme-color" content="#11284b">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rubik:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="{{ url_for('static', filename='remode.css') }}">
 {% block head %}{% endblock %}
 </head>
 <body>
-<header>
-  <b>Moda re- · Transporte</b>
-  {% if current_user.is_authenticated %}
-    {% if current_user.rol == 'admin' %}
-      {% set ruta = request.path %}
-      <a href="{{ url_for('admin.panel') }}" class="{{ 'on' if ruta == '/admin/' }}">Panel</a>
-      <a href="{{ url_for('admin.planificacion') }}" class="{{ 'on' if ruta.startswith('/admin/planificacion') }}">Planificación</a>
-      <a href="{{ url_for('admin.pedidos') }}" class="{{ 'on' if ruta.startswith('/admin/pedidos') }}">Pedidos</a>
-      <a href="{{ url_for('admin.lista', ent='tiendas') }}" class="{{ 'on' if ruta.startswith('/admin/tiendas') }}">Tiendas</a>
-      <a href="{{ url_for('admin.lista', ent='plantas') }}" class="{{ 'on' if ruta.startswith('/admin/plantas') }}">Plantas</a>
-      <a href="{{ url_for('admin.lista', ent='almacenes') }}" class="{{ 'on' if ruta.startswith('/admin/almacenes') }}">Almacenes</a>
-      <a href="{{ url_for('admin.lista', ent='camiones-troncal') }}" class="{{ 'on' if ruta.startswith('/admin/camiones-troncal') }}">Camiones troncal</a>
-      <a href="{{ url_for('admin.lista', ent='camiones-reparto') }}" class="{{ 'on' if ruta.startswith('/admin/camiones-reparto') }}">Camiones reparto</a>
-      <a href="{{ url_for('admin.lista', ent='usuarios') }}" class="{{ 'on' if ruta.startswith('/admin/usuarios') }}">Usuarios</a>
-      <a href="{{ url_for('admin.movimientos') }}" class="{{ 'on' if ruta.startswith('/admin/movimientos') }}">Movimientos</a>
-      <a href="{{ url_for('central') }}" class="{{ 'on' if ruta.startswith('/central') }}">Optimizador</a>
-    {% else %}
-      <a href="{{ inicio_de(current_user) }}" class="on">Mi {{ ROLES[current_user.rol]|lower }}</a>
-    {% endif %}
-    <span class="sp"></span>
-    <a href="{{ url_for('auth.cuenta') }}">{{ current_user.username }} · {{ ROLES[current_user.rol] }}</a>
-    <form method="post" action="{{ url_for('auth.salir') }}" style="margin:0">
-      <input type="hidden" name="_csrf" value="{{ csrf_token() }}"><button class="link">Salir</button></form>
+{% include "gestion/_iconos.html" %}
+
+{% macro enlace(url, icono, texto, activo) %}<a href="{{ url }}" {% if activo %}aria-current="page"{% endif %}><svg class="i"><use href="#i-{{ icono }}"/></svg>{{ texto }}</a>{% endmacro %}
+
+{% block layout %}
+{% set ruta = request.path %}
+{% set con_sesion = current_user.is_authenticated %}
+<div class="shell" {% if not con_sesion %}style="grid-template-columns:1fr"{% endif %}>
+  {% if con_sesion %}
+  <aside class="side" aria-label="Menú principal">
+    <a class="marca cosido" href="{{ inicio_de(current_user) }}" aria-label="ReMode Studio · inicio">
+      <img src="{{ url_for('static', filename='marca/logo_rms_sm.webp') }}" alt="RMS" width="190" height="88">
+      <b>ReMode Studio</b><small>Transporte</small></a>
+    <nav class="nav">
+      {% if current_user.rol == 'admin' %}
+      <div class="nav-group"><span>Operación</span>
+        {{ enlace(url_for('admin.panel'), 'home', 'Panel', ruta == '/admin/') }}
+        {{ enlace(url_for('admin.planificacion'), 'calendar', 'Planificación', ruta.startswith('/admin/planificacion')) }}
+        {{ enlace(url_for('admin.pedidos'), 'box', 'Pedidos', ruta.startswith('/admin/pedidos')) }}
+        {{ enlace(url_for('admin.movimientos'), 'activity', 'Movimientos', ruta.startswith('/admin/movimientos')) }}
+      </div>
+      <div class="nav-group"><span>Red</span>
+        {{ enlace(url_for('admin.lista', ent='tiendas'), 'store', 'Tiendas', ruta.startswith('/admin/tiendas') or ruta.startswith('/tienda/')) }}
+        {{ enlace(url_for('admin.lista', ent='plantas'), 'factory', 'Plantas', ruta.startswith('/admin/plantas') or ruta.startswith('/planta/')) }}
+        {{ enlace(url_for('admin.lista', ent='almacenes'), 'warehouse', 'Almacenes', ruta.startswith('/admin/almacenes') or ruta.startswith('/almacen/')) }}
+      </div>
+      <div class="nav-group"><span>Flota</span>
+        {{ enlace(url_for('admin.lista', ent='camiones-troncal'), 'truck', 'Camiones troncales', ruta.startswith('/admin/camiones-troncal')) }}
+        {{ enlace(url_for('admin.lista', ent='camiones-reparto'), 'van', 'Camiones de reparto', ruta.startswith('/admin/camiones-reparto')) }}
+      </div>
+      <div class="nav-group"><span>Sistema</span>
+        {{ enlace(url_for('admin.lista', ent='usuarios'), 'users', 'Usuarios', ruta.startswith('/admin/usuarios')) }}
+        {{ enlace(url_for('admin.lista', ent='categorias'), 'tag', 'Categorías de prenda', ruta.startswith('/admin/categorias')) }}
+        {{ enlace(url_for('central'), 'map', 'Optimizador avanzado', ruta.startswith('/central')) }}
+      </div>
+      {% else %}
+      {% set icono_rol = {'tienda': 'store', 'planta': 'factory', 'almacen': 'warehouse'}[current_user.rol] %}
+      <div class="nav-group"><span>{{ ROLES[current_user.rol] }}</span>
+        {{ enlace(inicio_de(current_user), icono_rol, 'Mi ' ~ ROLES[current_user.rol]|lower, not ruta.startswith('/cuenta')) }}
+      </div>
+      {% endif %}
+    </nav>
+    <div class="side-foot">
+      <a class="who" href="{{ url_for('auth.cuenta') }}" {% if ruta.startswith('/cuenta') %}aria-current="page"{% endif %}>
+        <span class="avatar">{{ (current_user.nombre or current_user.username)[:2]|upper }}</span>
+        <span><b>{{ current_user.nombre or current_user.username }}</b><small>{{ current_user.username }} · {{ ROLES[current_user.rol] }}</small></span>
+      </a>
+      <form method="post" action="{{ url_for('auth.salir') }}" data-no-busy><input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+        <button><svg class="i"><use href="#i-logout"/></svg>Cerrar sesión</button></form>
+    </div>
+  </aside>
   {% endif %}
-</header>
-<main>
-  {% for cat, msg in get_flashed_messages(with_categories=true) %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}
-  {% block body %}{% endblock %}
-</main>
+
+  <div>
+    {% if con_sesion %}
+    <div class="topbar">
+      <button data-menu aria-label="Abrir menú"><svg class="i"><use href="#i-menu"/></svg></button>
+      <a href="{{ inicio_de(current_user) }}"><img src="{{ url_for('static', filename='marca/icono_rms_64.png') }}" alt="">ReMode Studio</a>
+    </div>
+    {% endif %}
+    <main class="content"><div class="wrap">
+      {% block body %}{% endblock %}
+    </div></main>
+  </div>
+</div>
+{% endblock %}
+
+<div class="toasts" aria-live="polite">
+  {% for cat, msg in get_flashed_messages(with_categories=true) %}
+  <div class="toast {{ cat }}" role="{{ 'alert' if cat == 'error' else 'status' }}">
+    <svg class="i"><use href="#i-{{ 'alert' if cat == 'error' else 'check-circle' }}"/></svg>
+    <div class="txt">{{ msg }}</div>
+    <button type="button" aria-label="Cerrar" data-no-busy><svg class="i"><use href="#i-x"/></svg></button>
+  </div>
+  {% endfor %}
+</div>
+<script src="{{ url_for('static', filename='remode.js') }}"></script>
 </body>
 </html>

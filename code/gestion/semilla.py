@@ -18,6 +18,7 @@ import random
 import unicodedata
 
 import pandas as pd
+import sqlalchemy as sa
 from sqlalchemy import insert
 
 from modare import config as C
@@ -109,8 +110,7 @@ def crear_red(rng: random.Random):
                                stock_cajas=int(maxc * 0.25), capacidad_kg_semana=r.capacidad_kg_semana,
                                hora_inicio=r.hora_inicio_carga, hora_fin=r.hora_fin_carga,
                                dias_recepcion=r.dias_recepcion, activo=bool(r.activo)))
-    db.session.flush()
-    alm_por_prov = {a.provincia: a.id for a in Almacen.query}
+    db.session.flush()     # sin vetos: cualquier planta repone cualquier almacén y cualquier almacén sirve a cualquier tienda
 
     hoy = dt.date.today()
     filas_venta = []
@@ -123,7 +123,7 @@ def crear_red(rng: random.Random):
         t = Tienda(id=r.id_tienda, nombre=r.nombre, subtipo=_txt(r.subtipo), direccion=_txt(r.direccion),
                    municipio=r.municipio, provincia=r.provincia, ccaa=_txt(r.ccaa), lat=r.lat, lon=r.lon,
                    acceso_carretera=bool(r.acceso_carretera), superficie_m2=None if pd.isna(r.superficie_m2) else r.superficie_m2,
-                   categoria_tamano=cat_tam, almacen_id=alm_por_prov.get(r.provincia), ventas_anuales_eur=float(ventas_eur),
+                   categoria_tamano=cat_tam, ventas_anuales_eur=float(ventas_eur),
                    dias_recepcion=_txt(r.dias_recepcion, "L-V"), ventana_inicio=_txt(r.ventana_inicio, "10:00"),
                    ventana_fin=_txt(r.ventana_fin, "14:00"), tiempo_descarga_min=int(r.tiempo_descarga_min),
                    vehiculo_max=_txt(r.vehiculo_max),
@@ -211,6 +211,9 @@ def sembrar(log=print):
     crear_red(rng)
     crear_flota(rng)
     crear_usuarios()
+    from .modelos import Ajuste
+    Ajuste.set("migracion_almacen_plantas", "1")     # la BD nueva ya nace con el esquema actual
+    Ajuste.set("migracion_vetos", "1")
     db.session.commit()
     log(f"Base de datos creada: {Tienda.query.count()} tiendas, {Planta.query.count()} plantas, "
         f"{Almacen.query.count()} almacenes, {CamionTroncal.query.count()} camiones troncales, "
@@ -221,22 +224,30 @@ def sembrar(log=print):
 
 
 def sembrar_si_vacia(log=print):
-    db.create_all()
+    db.create_all()          # crea también las tablas nuevas en una BD antigua
     if not db.session.query(Categoria.id).first():
         sembrar(log)
+    migrar(log)
 
 
-if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--reset", action="store_true", help="borra gestion.db y la vuelve a crear")
-    a = ap.parse_args()
-    from flask import Flask
-
-    from . import DB_PATH
-    app = Flask(__name__)
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("MODARE_DB", f"sqlite:///{DB_PATH}")
-    db.init_app(app)
-    with app.app_context():
-        if a.reset:
-            db.drop_all()
-        sembrar_si_vacia()
+def migrar(log=print):
+    """Cambios de esquema sobre una gestion.db ya existente (sin perder datos)."""
+    from .modelos import Ajuste
+    insp = sa.inspect(db.engine)
+    if Ajuste.get("migracion_vetos") != "1":
+        # antes: plantas PERMITIDAS por almacén y almacén habitual de cada tienda.
+        # ahora: todo vale salvo lo vetado -> vetadas = todas las plantas − las que estaban permitidas
+        if "almacen_plantas" in insp.get_table_names():
+            permitidas = {}
+            for a_id, p_id in db.session.execute(sa.text("SELECT almacen_id, planta_id FROM almacen_plantas")):
+                permitidas.setdefault(a_id, set()).add(p_id)
+            todas = Planta.query.all()
+            for a in Almacen.query:
+                if a.id in permitidas:
+                    a.plantas_vetadas = [p for p in todas if p.id not in permitidas[a.id]]
+            db.session.execute(sa.text("DROP TABLE almacen_plantas"))
+        if "almacen_id" in {c["name"] for c in insp.get_columns("tiendas")}:
+            db.session.execute(sa.text("UPDATE tiendas SET almacen_id = NULL"))   # columna antigua, ya sin uso
+        Ajuste.set("migracion_vetos", "1")
+        db.session.commit()
+        log("Migración: almacén habitual de las tiendas eliminado; plantas no permitidas convertidas en vetos.")

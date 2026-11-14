@@ -1,17 +1,23 @@
 {% extends "base.html" %}
-{% from "gestion/_m.html" import csrf with context %}
+{% from "gestion/_m.html" import csrf, cabecera with context %}
+{% block title %}Mi cuenta · ReMode Studio{% endblock %}
 {% block body %}
-<h1>Mi cuenta</h1>
-<div class="card" style="max-width:520px">
-  <p class="muted">Usuario <b>{{ current_user.username }}</b> · {{ ROLES[current_user.rol] }}
-    {% if current_user.entidad_id %} · {{ current_user.entidad_id }}{% endif %}</p>
-  <form method="post">{{ csrf() }}
-    <label>Nombre</label><input name="nombre" value="{{ current_user.nombre or '' }}">
-    <label>Email</label><input type="email" name="email" value="{{ current_user.email or '' }}">
-    <label>Contraseña actual</label><input type="password" name="actual" required autocomplete="current-password">
-    <label>Nueva contraseña</label><input type="password" name="nueva" required minlength="8" autocomplete="new-password">
-    <label>Repite la nueva contraseña</label><input type="password" name="repetir" required minlength="8" autocomplete="new-password">
-    <p><button>Guardar</button></p>
+{{ cabecera('Mi cuenta', current_user.username ~ ' · ' ~ ROLES[current_user.rol] ~ ((' · ' ~ current_user.entidad_id) if current_user.entidad_id else '')) }}
+<div class="grid-2">
+  <form method="post" class="card">{{ csrf() }}<input type="hidden" name="accion" value="datos">
+    <h2>Datos personales</h2>
+    <label for="nombre">Nombre</label><input id="nombre" name="nombre" value="{{ current_user.nombre or '' }}" autocomplete="name">
+    <label for="email">Email</label><input id="email" type="email" name="email" value="{{ current_user.email or '' }}" autocomplete="email">
+    {% if current_user.ultimo_acceso %}<p class="small mt">Último acceso: {{ current_user.ultimo_acceso.strftime('%d/%m/%Y %H:%M') }}</p>{% endif %}
+    <div class="form-foot"><button>Guardar datos</button></div>
+  </form>
+  <form method="post" class="card">{{ csrf() }}<input type="hidden" name="accion" value="password">
+    <h2>Cambiar contraseña</h2>
+    <label for="actual">Contraseña actual</label><input id="actual" type="password" name="actual" required autocomplete="current-password">
+    <label for="nueva">Nueva contraseña</label><input id="nueva" type="password" name="nueva" required minlength="8" autocomplete="new-password">
+    <div class="ayuda">Mínimo 8 caracteres.</div>
+    <label for="repetir">Repite la nueva contraseña</label><input id="repetir" type="password" name="repetir" required minlength="8" autocomplete="new-password">
+    <div class="form-foot"><button>Cambiar contraseña</button></div>
   </form>
 </div>
 {% endblock %}

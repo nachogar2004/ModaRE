@@ -20,7 +20,7 @@ from . import optimizador as OPT
 from . import rol_requerido
 from .modelos import (DIAS_SEMANA, ESTADOS_CAMION, ESTADOS_PEDIDO, FRECUENCIAS, ROLES, Almacen, CamionReparto,
                       CamionTroncal, Categoria, MovimientoStock, Pedido, Planta, Reposicion, StockPlanta, StockTienda,
-                      Tienda, Usuario, Viaje, db)
+                      Tienda, Usuario, Venta, Viaje, db)
 from .semilla import _slug, capacidad_vehiculos
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -38,11 +38,12 @@ def _solo_admin():
 class Campo:
     nombre: str
     etiqueta: str
-    tipo: str = "text"            # text, int, float, bool, select, date, time, textarea, password
+    tipo: str = "text"            # text, int, float, bool, select, multi, date, time, textarea, password
     opciones: Callable[[], list[tuple[str, str]]] | None = None
     requerido: bool = False
     ayuda: str = ""
     solo_alta: bool = False       # p. ej. el id no se cambia después
+    modelo: Any = None            # tipo "multi": modelo de los elementos marcados
 
 
 @dataclass
@@ -117,9 +118,6 @@ def _usuario_para(rol, entidad):
 
 def _alta_tienda(t, _form):
     t.stock = [StockTienda(categoria_id=c.id, unidades=0) for c in Categoria.query]
-    if not t.almacen_id:
-        a = Almacen.query.filter_by(provincia=t.provincia, activo=True).first()
-        t.almacen_id = a.id if a else None
     _usuario_para("tienda", t)
 
 
@@ -133,8 +131,9 @@ def _alta_almacen(a, _form):
 
 
 def _id_tienda(_obj):
-    ultimo = db.session.query(func.max(Tienda.id)).scalar() or "TD-000"
-    return f"TD-{int(ultimo.split('-')[1]) + 1:03d}"
+    """Siguiente TD-### (numérico: TD-1000 va después de TD-999, no antes)."""
+    nums = [int(i.split("-")[1]) for (i,) in db.session.query(Tienda.id) if re.fullmatch(r"TD-\d+", i)]
+    return f"TD-{max(nums, default=0) + 1:03d}"
 
 
 def _alta_usuario(u, form):
@@ -153,7 +152,8 @@ ENTIDADES: dict[str, Entidad] = {
          Campo("acceso_carretera", "Acceso por carretera", "bool", ayuda="Desmarcar en islas (envío marítimo)"),
          Campo("superficie_m2", "Superficie (m²)", "float"),
          Campo("categoria_tamano", "Tamaño", "select", _op(TAMANOS), requerido=True),
-         Campo("almacen_id", "Almacén habitual", "select", _op_almacenes, ayuda="Vacío = el de su provincia"),
+         Campo("almacenes_vetados", "Almacenes de los que NO quiere recibir ropa", "multi", _op_almacenes, modelo=Almacen,
+               ayuda="Por defecto ninguno: el optimizador elige cada semana el almacén que mejor la sirve"),
          Campo("ventas_anuales_eur", "Ventas anuales (€)", "float", ayuda="Lo usa la estimación de demanda del optimizador"),
          Campo("dias_recepcion", "Días de recepción", ayuda="L-V, M-V…"),
          Campo("ventana_inicio", "Recepción desde", "time"), Campo("ventana_fin", "Recepción hasta", "time"),
@@ -167,7 +167,7 @@ ENTIDADES: dict[str, Entidad] = {
          Campo("responsable", "Responsable"), Campo("telefono", "Teléfono"), Campo("email", "Email"),
          Campo("activa", "Activa", "bool"), Campo("fecha_alta", "Fecha de alta", "date")],
         [("id", "Código"), ("nombre", "Nombre"), ("provincia", "Provincia"), ("categoria_tamano", "Tamaño"),
-         ("almacen_id", "Almacén"), ("frecuencia_pedido", "Pedido auto"), ("stock_prendas", "Stock (prendas)"),
+         ("almacenes_vetados_txt", "Vetados"), ("frecuencia_pedido", "Pedido auto"), ("stock_prendas", "Stock (prendas)"),
          ("activa", "Activa")],
         orden=Tienda.id, activo="activa", al_crear=_alta_tienda, id_auto=_id_tienda,
         enlace=lambda o: url_for("tienda.panel", tid=o.id), filtros=["provincia", "nombre", "id"]),
@@ -196,10 +196,12 @@ ENTIDADES: dict[str, Entidad] = {
          Campo("capacidad_kg_semana", "Capacidad de reparto (kg/semana)", "float", requerido=True),
          Campo("hora_inicio", "Abre", "time"), Campo("hora_fin", "Cierra", "time"),
          Campo("dias_recepcion", "Días de recepción", ayuda="L-V"),
-         Campo("planta_id", "Planta que lo repone", "select", _op_plantas, ayuda="Se actualiza con cada plan"),
+         Campo("plantas_vetadas", "Plantas de las que NO quiere recibir ropa", "multi", _op_plantas, modelo=Planta,
+               ayuda="Por defecto ninguna: el optimizador elige cada semana la planta que mejor lo repone"),
          Campo("responsable", "Responsable"), Campo("telefono", "Teléfono"), Campo("activo", "Activo", "bool")],
         [("id", "Código"), ("provincia", "Provincia"), ("municipio", "Municipio"), ("stock_cajas", "Cajas"),
-         ("stock_max_cajas", "Máximo"), ("ocupacion", "Ocupación"), ("planta_id", "Planta"), ("activo", "Activo")],
+         ("stock_max_cajas", "Máximo"), ("ocupacion", "Ocupación"), ("plantas_vetadas_txt", "Plantas vetadas"),
+         ("planta_id", "Último plan"), ("activo", "Activo")],
         orden=Almacen.provincia, activo="activo", al_crear=_alta_almacen,
         id_auto=lambda a: f"AL-{_slug(a.provincia)}", enlace=lambda o: url_for("almacen.panel", aid=o.id), filtros=["provincia"]),
     "camiones-troncal": Entidad(
@@ -251,6 +253,51 @@ def _obtener(e: Entidad, oid: str):
     return db.get_or_404(e.modelo, int(oid) if numerico else oid)
 
 
+# Secciones del formulario de cada entidad (los campos no listados van al final, en «Otros datos»)
+SECCIONES = {
+    "tiendas": [("Identificación", ["id", "nombre", "subtipo", "categoria_tamano", "superficie_m2", "ventas_anuales_eur",
+                                    "capacidad_max_prendas"]),
+                ("Ubicación", ["direccion", "municipio", "provincia", "ccaa", "lat", "lon", "acceso_carretera"]),
+                ("Recepción de mercancía", ["dias_recepcion", "ventana_inicio", "ventana_fin", "tiempo_descarga_min",
+                                            "vehiculo_max"]),
+                ("Pedido automático", ["pedido_auto_activo", "frecuencia_pedido", "dia_pedido", "dias_seguridad"]),
+                ("Contacto y estado", ["responsable", "telefono", "email", "fecha_alta", "activa"]),
+                ("Almacenes vetados", ["almacenes_vetados"])],
+    "plantas": [("Identificación", ["id", "nombre", "activa", "apertura_prevista"]),
+                ("Ubicación", ["direccion", "municipio", "provincia", "lat", "lon"]),
+                ("Capacidad y horario", ["capacidad_salida_kg_semana", "stock_max_prendas", "hora_inicio_carga", "hora_fin_carga"]),
+                ("Contacto", ["responsable", "telefono"])],
+    "almacenes": [("Identificación", ["id", "nombre", "provincia", "activo"]),
+                  ("Ubicación", ["poligono", "municipio", "lat", "lon"]),
+                  ("Stock y capacidad", ["stock_cajas", "stock_max_cajas", "capacidad_kg_semana"]),
+                  ("Horario", ["hora_inicio", "hora_fin", "dias_recepcion"]),
+                  ("Plantas vetadas", ["plantas_vetadas"]),
+                  ("Contacto", ["responsable", "telefono"])],
+    "camiones-troncal": [("Vehículo", ["planta_id", "tipo_vehiculo", "matricula", "operador", "estado"]),
+                         ("Capacidad", ["carga_util_kg", "capacidad_cajas", "capacidad_palets"]),
+                         ("Conductor y mantenimiento", ["conductor", "telefono_conductor", "itv_vence", "km_acumulados", "notas"])],
+    "camiones-reparto": [("Vehículo", ["almacen_id", "tipo_vehiculo", "matricula", "operador", "estado"]),
+                         ("Capacidad", ["carga_util_kg", "capacidad_cajas", "capacidad_palets"]),
+                         ("Conductor y mantenimiento", ["conductor", "telefono_conductor", "itv_vence", "km_acumulados", "notas"])],
+    "usuarios": [("Cuenta", ["username", "nombre", "email", "password", "activo"]),
+                 ("Permisos", ["rol", "tienda_id", "planta_id", "almacen_id"])],
+}
+
+
+def secciones(ent: str, e: Entidad) -> list[tuple[str | None, list[Campo]]]:
+    por_nombre = {c.nombre: c for c in e.campos}
+    out, usados = [], set()
+    for titulo, nombres in SECCIONES.get(ent, []):
+        cs = [por_nombre[n] for n in nombres if n in por_nombre]
+        usados.update(c.nombre for c in cs)
+        if cs:
+            out.append((titulo, cs))
+    resto = [c for c in e.campos if c.nombre not in usados]
+    if resto:
+        out.append(("Otros datos" if out else None, resto))
+    return out
+
+
 def _ent(nombre) -> Entidad:
     e = ENTIDADES.get(nombre)
     if not e:
@@ -281,6 +328,10 @@ def _valor(campo: Campo, raw: str | None):
 def _aplicar(e: Entidad, obj, form, alta: bool):
     for c in e.campos:
         if c.solo_alta and not alta:
+            continue
+        if c.tipo == "multi":
+            ids = form.getlist(c.nombre)
+            setattr(obj, c.nombre, c.modelo.query.filter(c.modelo.id.in_(ids)).all() if ids else [])
             continue
         v = _valor(c, form.get(c.nombre))
         if c.tipo == "password":
@@ -336,10 +387,19 @@ def editar(ent, oid=None):
             flash(msg, "error")
             if not alta:
                 obj = _obtener(e, oid)
-    return render_template("gestion/admin_form.html", e=e, ent=ent, obj=obj, alta=alta, form=request.form)
+    return render_template("gestion/admin_form.html", e=e, ent=ent, obj=obj, alta=alta, form=request.form,
+                           secciones=secciones(ent, e), oid=oid)
 
 
 def _validar_usuario(u: Usuario):
+    if u.id == current_user.id and (u.rol != "admin" or not u.activo):
+        raise ValueError("No puedes quitarte el rol de administrador ni desactivar tu propio usuario.")
+    if u.rol != "admin" or not u.activo:
+        otros = Usuario.query.filter(Usuario.rol == "admin", Usuario.activo.is_(True), Usuario.id != u.id).count()
+        with db.session.no_autoflush:      # el rol que tenía en la BD, antes de este cambio
+            era_admin = u.id is not None and db.session.query(Usuario.rol).filter_by(id=u.id).scalar() == "admin"
+        if era_admin and otros == 0:
+            raise ValueError("Tiene que quedar al menos un administrador activo.")
     necesita = {"tienda": "tienda_id", "planta": "planta_id", "almacen": "almacen_id"}
     for rol, col in necesita.items():
         if u.rol == rol and not getattr(u, col):
@@ -359,6 +419,8 @@ def borrar(ent, oid):
         return redirect(url_for("admin.lista", ent=ent))
     col_usuario = {"tiendas": Usuario.tienda_id, "plantas": Usuario.planta_id, "almacenes": Usuario.almacen_id}.get(ent)
     try:
+        if _tiene_historial(ent, obj):
+            raise IntegrityError("historial", None, Exception())
         if col_usuario is not None:          # su usuario se va con ella
             Usuario.query.filter(col_usuario == obj.id).delete()
         db.session.delete(obj)
@@ -382,6 +444,23 @@ def borrar(ent, oid):
     return redirect(url_for("admin.lista", ent=ent))
 
 
+def _tiene_historial(ent: str, obj) -> bool:
+    """Datos que no deben desaparecer al borrar: ventas (se borrarían en cascada), pedidos, movimientos…"""
+    if ent == "tiendas":
+        return any(q.first() for q in (Venta.query.filter_by(tienda_id=obj.id), Pedido.query.filter_by(tienda_id=obj.id),
+                                        MovimientoStock.query.filter_by(entidad="tienda", entidad_id=obj.id)))
+    if ent == "plantas":
+        return any(q.first() for q in (Reposicion.query.filter_by(planta_id=obj.id),
+                                        MovimientoStock.query.filter_by(entidad="planta", entidad_id=obj.id)))
+    if ent == "almacenes":
+        return any(q.first() for q in (Reposicion.query.filter_by(almacen_id=obj.id), Pedido.query.filter_by(almacen_id=obj.id),
+                                        MovimientoStock.query.filter_by(entidad="almacen", entidad_id=obj.id)))
+    if ent == "usuarios":
+        return bool(MovimientoStock.query.filter_by(usuario_id=obj.id).first()
+                    or Pedido.query.filter_by(creado_por_id=obj.id).first())
+    return False
+
+
 # ----------------------------------------------------------------------------- panel y consultas
 @bp.route("/")
 def panel():
@@ -401,8 +480,11 @@ def panel():
     }
     plantas = Planta.query.filter_by(activa=True).order_by(Planta.id).all()
     almacenes = Almacen.query.filter_by(activo=True).order_by(Almacen.stock_cajas.desc()).all()
+    adicionales = (Pedido.query.filter(Pedido.tipo == "adicional", Pedido.estado != "cancelado")
+                   .order_by(Pedido.urgente.desc(), Pedido.creado.desc()).limit(6).all())
     return render_template("gestion/admin_panel.html", kpi=kpi, sem=sem, plantas=plantas, almacenes=almacenes,
-                           alertas=L.alertas("admin"))
+                           alertas=L.alertas("admin"), cerrada=L.semana_cerrada(sem), adicionales=adicionales,
+                           hay_plan=Viaje.query.filter_by(semana=sem).first() is not None)
 
 
 @bp.route("/pedidos")
@@ -462,8 +544,11 @@ def planificacion():
     flota_r = {}
     for c in CamionReparto.query.filter(CamionReparto.estado != "baja"):
         flota_r.setdefault(c.almacen_id, []).append(c)
+    lunes = L.lunes_de(semana)
     return render_template(
         "gestion/admin_planificacion.html", semana=semana, peds=peds, resumen=resumen,
+        sem_ant=L.semana_iso(lunes - dt.timedelta(days=7)), sem_sig=L.semana_iso(lunes + dt.timedelta(days=7)),
+        sem_actual=L.semana_entrega_para(dt.date.today()),
         kg=round(sum(p.kg for p in peds), 1), cajas=sum(p.cajas for p in peds),
         tiendas=len({p.tienda_id for p in peds}), cerrada=L.semana_cerrada(semana), viajes=viajes, reps=reps,
         plan=cargar_plan(semana), trabajo=OPT.TRABAJOS.get(semana), flota_t=flota_t, flota_r=flota_r)
