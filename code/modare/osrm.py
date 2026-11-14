@@ -10,6 +10,7 @@ Si el servidor no responde, el plan sigue funcionando: los tramos sin trazado se
 from __future__ import annotations
 
 import json
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -22,6 +23,38 @@ CACHE_GEOM = C.DATA_DIR / "geometrias_osrm.json"
 _ultima = 0.0
 
 
+def _contexto_ssl() -> ssl.SSLContext:
+    """Certificados del sistema + los de certifi.
+    * Del sistema: en redes con inspección HTTPS (antivirus, proxy de empresa/universidad) el certificado
+      raíz de la red solo está en el almacén del sistema operativo.
+    * De certifi: el Python de python.org en macOS no trae certificados del sistema y sin certifi todas las
+      peticiones HTTPS fallan con CERTIFICATE_VERIFY_FAILED."""
+    ctx = ssl.create_default_context()
+    try:
+        import certifi
+        ctx.load_verify_locations(cafile=certifi.where())
+    except (ImportError, OSError):
+        pass
+    return ctx
+
+
+_SSL = _contexto_ssl()
+
+
+class SinConexion(RuntimeError):
+    """Fallo de red o de certificados: no tiene sentido seguir intentándolo con más rutas."""
+
+
+def _explicar(e: Exception) -> str:
+    txt = str(e)
+    if "CERTIFICATE_VERIFY_FAILED" in txt or isinstance(getattr(e, "reason", None), ssl.SSLError):
+        return (f"{txt} -> problema de certificados SSL. Solución: '.venv/bin/python -m pip install certifi' "
+                "(o en Mac ejecutar 'Install Certificates.command' de la carpeta de Python), o probar otra red/sin VPN")
+    if isinstance(e, urllib.error.HTTPError) and e.code == 429:
+        return f"{txt} -> el servidor público de OSRM limita las peticiones; vuelve a intentarlo en unos minutos"
+    return txt
+
+
 def _get(path: str, intentos: int = 4) -> dict:
     global _ultima
     for k in range(intentos):
@@ -31,14 +64,22 @@ def _get(path: str, intentos: int = 4) -> dict:
         _ultima = time.time()
         try:
             req = urllib.request.Request(URL + path, headers={"User-Agent": "modare-prototipo/1.0"})
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with urllib.request.urlopen(req, timeout=60, context=_SSL) as r:
                 data = json.loads(r.read().decode())
             if data.get("code") == "Ok":
                 return data
             raise RuntimeError(data.get("message") or data.get("code"))
-        except (urllib.error.URLError, TimeoutError, RuntimeError, json.JSONDecodeError) as e:
+        except urllib.error.HTTPError as e:          # 429 (límite de peticiones), 5xx...
             if k == intentos - 1:
-                raise
+                raise RuntimeError(_explicar(e)) from e
+            time.sleep(10 if e.code == 429 else 2 ** k * 2)
+        except urllib.error.URLError as e:           # sin red, DNS, SSL: reintentar no suele servir
+            if k == intentos - 1 or isinstance(e.reason, ssl.SSLError):
+                raise SinConexion(_explicar(e)) from e
+            time.sleep(2 ** k * 2)
+        except (TimeoutError, RuntimeError, json.JSONDecodeError) as e:
+            if k == intentos - 1:
+                raise RuntimeError(_explicar(e)) from e
             time.sleep(2 ** k * 2)
     raise RuntimeError("inalcanzable")
 
@@ -125,6 +166,7 @@ def añadir_geometrias(plan: dict, log=print) -> None:
     lugares = {p["id"]: (p["lat"], p["lon"]) for p in plan["plantas"] + plan.get("almacenes", [])}
     cache = _cargar_cache()
     nuevas = fallos = 0
+    sin_conexion = None
     for r in plan["rutas"]:
         origen = r.get("origen", r["planta"])
         ids = [origen] + [p["tienda"] for p in r["paradas"]] + [origen]
@@ -132,7 +174,9 @@ def añadir_geometrias(plan: dict, log=print) -> None:
         # clave por coordenadas (no por id): si se mueve un almacén, su trazado deja de valer
         claves = [f"{a[0]:.5f},{a[1]:.5f}|{b[0]:.5f},{b[1]:.5f}" for a, b in zip(pts, pts[1:])]
         faltan = [k for k, (a, b) in zip(claves, zip(ids, ids[1:])) if a != b and k not in cache]
-        if faltan:
+        if faltan and sin_conexion:
+            fallos += 1
+        elif faltan:
             try:
                 data = _get(f"/route/v1/driving/{_coords(pts)}?overview=false&steps=true&geometries=polyline")
                 for k, leg in zip(claves, data["routes"][0]["legs"]):
@@ -142,11 +186,16 @@ def añadir_geometrias(plan: dict, log=print) -> None:
                         tramo += g[1:] if tramo else g
                     cache[k] = _codificar(tramo)
                 nuevas += 1
-            except Exception as e:  # sin red o servidor caído: se dibuja en línea recta
+            except SinConexion as e:  # red/SSL: se avisa una vez y no se insiste con el resto de rutas
+                fallos += 1
+                sin_conexion = e
+                log(f"  aviso: no se puede conectar con OSRM: {e}")
+            except Exception as e:  # servidor caído, límite de peticiones...: se dibuja en línea recta
                 fallos += 1
                 log(f"  aviso: sin trazado OSRM para {r.get('nombre', r['id'])}: {e}")
         r["geometria"] = [cache.get(k, "") for k in claves]
     if nuevas:
         CACHE_GEOM.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
     log(f"  trazados por carretera: {nuevas} rutas pedidas a OSRM, {len(plan['rutas']) - nuevas - fallos} desde caché"
-        + (f", {fallos} sin trazado (línea recta)" if fallos else ""))
+        + (f", {fallos} sin trazado (línea recta; para reintentar solo el dibujo: "
+           f"python -m modare.visualizar {plan['resumen']['semana']})" if fallos else ""))

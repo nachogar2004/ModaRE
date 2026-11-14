@@ -148,7 +148,7 @@ PLANTILLA = r"""<!doctype html>
 </div></div>
 <div class="tab" id="tab-almacenes"><div class="panel">
   <h2>Almacenes (cross-dock)</h2>
-  <p class="sub">Lo que cuesta reponer cada almacén desde su planta y repartir desde él a sus tiendas. No incluye el coste de operar el almacén (hoy 0).</p>
+  <p class="sub">Lo que cuesta reponer cada almacén desde su planta y repartir desde él a sus tiendas. Incluye el coste de operar el almacén (fijo semanal + manipulación, datos SINTÉTICOS de almacenes.csv).</p>
   <div class="ctrl" id="ctrl-almacenes"></div>
   <div class="tabla-wrap" id="tabla-almacenes"></div>
 </div></div>
@@ -189,9 +189,13 @@ document.getElementById("cab").innerHTML =
   `<h1>Rutas ${esc(R.semana)}</h1>` +
   [["Rutas", T ? `${R.rutas} <span class="kpi">(${T.rutas} troncal + ${Rp.rutas} reparto)</span>` : R.rutas],
    ["Camiones", R.camiones], ["km", num(R.km)],
-   ["Coste", T ? `${eur(R.coste_eur)} <span class="kpi">(${eur(T.coste_eur)} + ${eur(Rp.coste_eur)})</span>` : eur(R.coste_eur)],
-   ["€/kg", num(R.eur_por_kg, 3)], ["CO₂", num(R.co2_kg / 1000, 1) + " t"],
-   ["Servicio", num(100 * R.nivel_servicio, 1) + " %"], ["Almacenes", R.almacenes_usados ?? "–"]]
+   ["Coste", R.coste_total_eur != null
+      ? `${eur(R.coste_total_eur)} <span class="kpi">(troncal ${eur(T.coste_eur)} + reparto ${eur(Rp.coste_eur)} + almacenes ${eur(R.almacenes.total_eur)})</span>`
+      : T ? `${eur(R.coste_eur)} <span class="kpi">(${eur(T.coste_eur)} + ${eur(Rp.coste_eur)})</span>` : eur(R.coste_eur)],
+   ["€/kg", num(R.eur_por_kg_total ?? R.eur_por_kg, 3)], ["CO₂", num(R.co2_kg / 1000, 1) + " t"],
+   ["Servicio", num(100 * R.nivel_servicio, 1) + " %"], ["Almacenes", R.almacenes_usados != null ? `${R.almacenes_abiertos ?? R.almacenes_usados}` +
+     ((R.almacenes_abiertos ?? R.almacenes_usados) > R.almacenes_usados ? ` <span class="kpi">(${(R.almacenes_abiertos) - R.almacenes_usados} sin tiendas esta semana)</span>` : "") +
+     (R.almacenes_cerrados ? ` <span class="kpi">(${R.almacenes_cerrados} cerrados)</span>` : "") : "–"]]
   .map(([k, v]) => `<span class="kpi">${k} <b>${v}</b></span>`).join("");
 
 // ---------- mapa ----------
@@ -232,11 +236,16 @@ for (const r of rutas) {
   capas[r.nombre] = {base: L.layerGroup([ida, vuelta, ...puntos]), detalle: L.layerGroup([...flechas, ...nodos]), ida, vuelta};
 }
 for (const a of PLAN.almacenes || []) {
-  L.marker([a.lat, a.lon], {zIndexOffset: 500, icon: L.divIcon({className: "",
-      html: `<div class="almacen-ico" style="border-color:${COL_PLANTA[a.planta] || "#111"}"></div>`, iconSize: [12, 12], iconAnchor: [6, 6]})})
+  const cerrado = a.abierto === false;
+  L.marker([a.lat, a.lon], {zIndexOffset: cerrado ? 400 : 500, icon: L.divIcon({className: "",
+      html: `<div class="almacen-ico" style="border-color:${cerrado ? "#b8b8b8" : COL_PLANTA[a.planta] || "#111"};${cerrado ? "opacity:.7;background:#eee" : ""}"></div>`, iconSize: [12, 12], iconAnchor: [6, 6]})})
    .bindTooltip(esc(a.nombre) + (a.poligono ? " · " + esc(a.poligono) : ""))
-   .bindPopup(`<b>${esc(a.nombre)}</b> <span style="color:#6b7280">(${esc(a.id)})</span><br>${a.poligono ? esc(a.poligono) + (a.municipio ? " (" + esc(a.municipio) + ")" : "") + "<br>" : ""}Lo repone ${esc(a.planta)}<br>` +
-              `${a.tiendas} tiendas · ${num(a.kg)} / ${num(a.capacidad)} kg/semana (${num(100 * a.kg / a.capacidad)} %)`)
+   .bindPopup(`<b>${esc(a.nombre)}</b> <span style="color:#6b7280">(${esc(a.id)})</span><br>${a.poligono ? esc(a.poligono) + (a.municipio ? " (" + esc(a.municipio) + ")" : "") + "<br>" : ""}${cerrado ? "" : `Lo repone ${a.plantas && Object.keys(a.plantas).length > 1 ? Object.entries(a.plantas).map(([p, k]) => `${esc(p)} (${num(k)} kg)`).join(" + ") : esc(a.planta)}<br>`}` +
+              (cerrado ? `<b style="color:#6b7280">Cerrado</b>: al modelo le sale más barato servir sus tiendas desde otro almacén` :
+              !a.tiendas ? `Abierto, sin tiendas esta semana (sus tiendas pequeñas reciben en semanas alternas)` +
+                `<br>Coste almacén ${eur(a.coste_fijo_eur || 0)}/semana (solo fijo)` :
+              `${a.tiendas} tiendas · ${num(a.kg)} / ${num(a.capacidad)} kg/semana (${num(100 * a.kg / a.capacidad)} %)` +
+              (a.coste_fijo_eur != null ? `<br>Coste almacén ${eur(a.coste_fijo_eur + a.coste_manipulacion_eur)}/semana (fijo ${eur(a.coste_fijo_eur)} + manipulación ${eur(a.coste_manipulacion_eur)})` : "")))
    .addTo(map);
 }
 for (const p of PLAN.plantas) {
@@ -247,9 +256,9 @@ for (const p of PLAN.plantas) {
 }
 const leyenda = L.control({position: "bottomright"});
 leyenda.onAdd = () => { const d = L.DomUtil.create("div", "leyenda");
-  d.innerHTML = `<span class="planta-ico" style="background:#333">■ planta</span> &nbsp;<span class="almacen-ico" style="display:inline-block;border-color:#333"></span> almacén &nbsp;○ tienda<br>` +
+  d.innerHTML = `<span class="planta-ico" style="background:#333">■ planta</span> &nbsp;<span class="almacen-ico" style="display:inline-block;border-color:#333"></span> almacén <span class="almacen-ico" style="display:inline-block;border-color:#b8b8b8;background:#eee"></span> cerrado &nbsp;○ tienda<br>` +
     `<b>línea gruesa</b> = troncal (color de la planta) · fina = reparto · discontinua = vuelta · trazado por carretera (OSRM)<br>Clic en una ruta para ver el orden de paradas` +
-    ((PLAN.avisos || []).length ? `<br><span style="color:#b42318">${PLAN.avisos.length} tiendas fuera del VRP (islas)</span>` : "");
+    ((PLAN.avisos || []).length ? `<br><span style="color:#b42318">${PLAN.avisos.length} pedidos recortados (superan lo que la tienda puede recibir)</span>` : "");
   return d; };
 leyenda.addTo(map);
 
@@ -407,7 +416,7 @@ const sum = (xs, f = x => x) => xs.reduce((s, x) => s + (f(x) || 0), 0);
 const nombreLugar = id => (lugares[id] && lugares[id].nombre) || id;
 const corto = id => String(id || "").replace(/^(PL|AL)-/, "");
 const COMP = [["km", "Kilómetros", "var(--s1)"], ["horas", "Horas", "var(--s2)"], ["fijo", "Fijo/día", "var(--s3)"], ["pernoctas", "Pernoctas", "var(--s4)"]];
-const ESCC = [["troncal", "Troncal", "var(--s1)"], ["reparto", "Reparto", "var(--s2)"]];
+const ESCC = [["troncal", "Troncal", "var(--s1)"], ["reparto", "Reparto", "var(--s2)"], ["almacen", "Almacén", "var(--s3)"]];
 function hav(a, b) {  // km en línea recta
   const R = 6371, rad = Math.PI / 180, dLa = (b.lat - a.lat) * rad, dLo = (b.lon - a.lon) * rad;
   const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLo / 2) ** 2;
@@ -490,8 +499,10 @@ function calcular() {
   for (const a of Object.values(alm)) {
     a.eurKgTro = a.kgRecibido ? a.cTro / a.kgRecibido : 0;
     a.eurKgRep = a.kgRep ? a.cRep / a.kgRep : 0;
-    a.total = a.cTro + a.cRep;
-    a.eurKg = a.eurKgTro + a.eurKgRep;
+    a.cAlm = (a.coste_fijo_eur || 0) + (a.coste_manipulacion_eur || 0);   // fijo semanal + manipulación
+    a.eurKgAlm = a.kgRep ? a.cAlm / a.kgRep : 0;
+    a.total = a.cTro + a.cRep + a.cAlm;
+    a.eurKg = a.eurKgTro + a.eurKgRep + a.eurKgAlm;
     a.nTiendas = a.tiendasSet.size;
     a.uso = a.capacidad ? a.kg / a.capacidad : 0;
   }
@@ -499,7 +510,8 @@ function calcular() {
     const a = alm[t.almacen];
     t.eurKgTro = a ? a.eurKgTro : 0;
     t.cTro = t.kg * t.eurKgTro;          // el almacén es un depósito con stock: se reparte su €/kg troncal
-    t.total = t.cTro + t.cRep;
+    t.cAlm = t.kg * (a ? a.eurKgAlm : 0); // y su coste de almacén (fijo + manipulación) por kg
+    t.total = t.cTro + t.cRep + t.cAlm;
     t.eurKg = t.kg ? t.total / t.kg : 0;
     t.dist = a ? hav(a, t) : 0;
   }
@@ -527,9 +539,9 @@ function pintarCtrlTiendas() {
   document.getElementById("t-almacen").onchange = e => { FT.almacen = e.target.value; pintarTiendas(); };
   document.getElementById("t-q").oninput = e => { FT.q = e.target.value; pintarTiendas(); };
   document.getElementById("t-csv").onclick = () => descargarCSV(`coste_tiendas_${R.semana}.csv`,
-    ["tienda", "nombre", "municipio", "almacen", "planta", "kg_semana", "visitas", "rutas", "km_almacen_linea_recta", "coste_troncal_eur", "coste_reparto_eur", "coste_total_eur", "eur_por_kg"],
+    ["tienda", "nombre", "municipio", "almacen", "planta", "kg_semana", "visitas", "rutas", "km_almacen_linea_recta", "coste_troncal_eur", "coste_reparto_eur", "coste_almacen_eur", "coste_total_eur", "eur_por_kg"],
     filtrarTiendas().map(t => [t.id, t.nombre, t.municipio, t.almacen, t.planta, +t.kg.toFixed(1), t.visitas, t.rutas.join(" "), +t.dist.toFixed(1),
-      +t.cTro.toFixed(2), +t.cRep.toFixed(2), +t.total.toFixed(2), +t.eurKg.toFixed(4)]));
+      +t.cTro.toFixed(2), +t.cRep.toFixed(2), +t.cAlm.toFixed(2), +t.total.toFixed(2), +t.eurKg.toFixed(4)]));
 }
 function filtrarTiendas() {
   const q = FT.q.trim().toLowerCase();
@@ -542,7 +554,7 @@ function pintarTiendas() {
   const cara = fs.reduce((m, t) => !m || t.eurKg > m.eurKg ? t : m, null), barata = fs.reduce((m, t) => !m || t.eurKg < m.eurKg ? t : m, null);
   document.getElementById("tiles-tiendas").innerHTML = [
     ["Tiendas", num(fs.length), `${num(kg)} kg/semana`],
-    ["Coste asignado", eur(tot), `${eur(sum(fs, t => t.cTro))} troncal + ${eur(sum(fs, t => t.cRep))} reparto`],
+    ["Coste asignado", eur(tot), `${eur(sum(fs, t => t.cTro))} troncal + ${eur(sum(fs, t => t.cRep))} reparto + ${eur(sum(fs, t => t.cAlm))} almacén`],
     ["€/kg medio (ponderado)", kg ? eur2(tot / kg, 3) : "–", `mediana ${eur2(cuantil(ek, .5), 3)}`],
     ["Rango €/kg (p10 – p90)", `${eur2(cuantil(ek, .1))} – ${eur2(cuantil(ek, .9))}`, "el 80 % de las tiendas está en este rango"],
     ["Tienda más cara por kg", cara ? eur2(cara.eurKg, 3) : "–", cara ? cara.nombre : ""],
@@ -559,12 +571,13 @@ function pintarTiendas() {
     {k: "dist", t: "km al almacén", n: 1, title: "Distancia en línea recta almacén → tienda", f: t => num(t.dist)},
     {k: "cTro", t: "Troncal", n: 1, title: "kg de la tienda × €/kg troncal de su almacén", f: t => eur2(t.cTro)},
     {k: "cRep", t: "Reparto", n: 1, title: "Parte de su(s) ruta(s) de reparto", f: t => eur2(t.cRep)},
+    {k: "cAlm", t: "Almacén", n: 1, title: "kg de la tienda × €/kg de su almacén (fijo semanal + manipulación)", f: t => eur2(t.cAlm)},
     {k: "total", t: "Total", n: 1, f: t => `<b>${eur2(t.total)}</b>`},
     {k: "eurKg", t: "€/kg", n: 1, f: t => eur2(t.eurKg, 3)},
-    {k: "_", t: "Troncal · Reparto", f: t => barra([[t.cTro, "var(--s1)", "Troncal"], [t.cRep, "var(--s2)", "Reparto"]], max)},
+    {k: "_", t: "Troncal · Reparto · Almacén", f: t => barra([[t.cTro, "var(--s1)", "Troncal"], [t.cRep, "var(--s2)", "Reparto"], [t.cAlm, "var(--s3)", "Almacén"]], max)},
   ];
   const pie = `<td>Total (${fs.length})</td><td></td><td></td><td></td><td class="n">${num(kg)}</td><td class="n">${sum(fs, t => t.visitas)}</td><td></td>` +
-    `<td class="n">${eur(sum(fs, t => t.cTro))}</td><td class="n">${eur(sum(fs, t => t.cRep))}</td><td class="n">${eur(tot)}</td><td class="n">${kg ? eur2(tot / kg, 3) : ""}</td><td></td>`;
+    `<td class="n">${eur(sum(fs, t => t.cTro))}</td><td class="n">${eur(sum(fs, t => t.cRep))}</td><td class="n">${eur(sum(fs, t => t.cAlm))}</td><td class="n">${eur(tot)}</td><td class="n">${kg ? eur2(tot / kg, 3) : ""}</td><td></td>`;
   pintarTabla("tabla-tiendas", cols, fs, {pie, redraw: pintarTiendas, orden: {k: "eurKg", dir: -1}, onRow: t => irAMapa(t.rutas[0])});
   const totTro = sum(tro, r => r.coste_eur), totRep = sum(rep, r => r.coste_eur);
   const asigTro = sum(CALC.tiendas, t => t.cTro), asigRep = sum(CALC.tiendas, t => t.cRep);
@@ -573,8 +586,9 @@ function pintarTiendas() {
     `Como el almacén trabaja con stock, cada almacén tiene un <b>€/kg troncal</b> (coste troncal que le llega ÷ kg recibidos) y cada tienda paga ese €/kg por sus kg. ` +
     `Es una convención de imputación, no una factura: el coste de una ruta compartida no tiene un reparto “verdadero”.<br>` +
     `Cuadre: troncal ${eur(asigTro)} imputado de ${eur(totTro)} · reparto ${eur(asigRep)} de ${eur(totRep)}. ` +
-    `No incluye el coste de operar los almacenes.` +
-    ((PLAN.avisos || []).length ? ` <span class="aviso">${PLAN.avisos.length} tiendas de islas fuera del VRP (sin coste calculado): ${esc(PLAN.avisos.map(a => a.nombre).join(", "))}.</span>` : "");
+    `Almacén: cada tienda paga, por sus kg, el €/kg de su almacén (coste fijo semanal + manipulación ÷ kg que reparte); ` +
+    `imputado ${eur(sum(CALC.tiendas, t => t.cAlm))} de ${eur(R.almacenes ? R.almacenes.total_eur : 0)}.` +
+    ((PLAN.avisos || []).length ? ` <span class="aviso">${PLAN.avisos.length} pedidos recortados (superan lo que la tienda puede recibir): ${esc(PLAN.avisos.map(a => a.nombre).join(", "))}.</span>` : "");
 }
 
 // ---------- pestaña: rutas ----------
@@ -653,16 +667,18 @@ function pintarAlmacenes() {
     {k: "kmRep", t: "km reparto", n: 1, f: a => num(a.kmRep)},
     {k: "cTro", t: "Coste troncal", n: 1, f: a => eur2(a.cTro)},
     {k: "cRep", t: "Coste reparto", n: 1, f: a => eur2(a.cRep)},
+    {k: "cAlm", t: "Coste almacén", n: 1, title: "Fijo semanal + manipulación", f: a => eur2(a.cAlm)},
     {k: "total", t: "Total", n: 1, f: a => `<b>${eur2(a.total)}</b>`},
     {k: "eurKgTro", t: "€/kg troncal", n: 1, f: a => eur2(a.eurKgTro, 3)},
     {k: "eurKgRep", t: "€/kg reparto", n: 1, f: a => eur2(a.eurKgRep, 3)},
+    {k: "eurKgAlm", t: "€/kg almacén", n: 1, f: a => eur2(a.eurKgAlm, 3)},
     {k: "eurKg", t: "€/kg total", n: 1, f: a => `<b>${eur2(a.eurKg, 3)}</b>`},
-    {k: "_", t: "Troncal · Reparto", f: a => barra([[a.cTro, "var(--s1)", "Troncal"], [a.cRep, "var(--s2)", "Reparto"]], max)},
+    {k: "_", t: "Troncal · Reparto · Almacén", f: a => barra([[a.cTro, "var(--s1)", "Troncal"], [a.cRep, "var(--s2)", "Reparto"], [a.cAlm, "var(--s3)", "Almacén"]], max)},
   ];
-  const kg = sum(fs, a => a.kgRep), ct = sum(fs, a => a.cTro), cr = sum(fs, a => a.cRep);
+  const kg = sum(fs, a => a.kgRep), ct = sum(fs, a => a.cTro), cr = sum(fs, a => a.cRep), ca = sum(fs, a => a.cAlm);
   const pie = `<td>Total (${fs.length})</td><td></td><td class="n">${sum(fs, a => a.nTiendas)}</td><td class="n">${num(kg)}</td><td></td>` +
     `<td class="n">${new Set(fs.flatMap(a => [...a.rutasTro])).size}</td><td class="n">${sum(fs, a => a.rutasRep.length)}</td><td class="n">${num(sum(fs, a => a.kmRep))}</td>` +
-    `<td class="n">${eur(ct)}</td><td class="n">${eur(cr)}</td><td class="n">${eur(ct + cr)}</td><td></td><td></td><td class="n">${kg ? eur2((ct + cr) / kg, 3) : ""}</td><td></td>`;
+    `<td class="n">${eur(ct)}</td><td class="n">${eur(cr)}</td><td class="n">${eur(ca)}</td><td class="n">${eur(ct + cr + ca)}</td><td></td><td></td><td></td><td class="n">${kg ? eur2((ct + cr + ca) / kg, 3) : ""}</td><td></td>`;
   pintarTabla("tabla-almacenes", cols, fs, {pie, redraw: pintarAlmacenes, orden: {k: "eurKg", dir: -1},
     onRow: a => { mostrarTab("tiendas"); FT.planta = ""; FT.almacen = a.id; FT.q = ""; pintarCtrlTiendas(); pintarTiendas(); }});
 }
@@ -678,12 +694,13 @@ function agrupar(xs, clave) {
 }
 function camionesDe(filtro) { return sum((PLAN.flota || []).filter(filtro), f => f.camiones); }
 function pintarResumen() {
-  const cT = sum(tro, r => r.coste_eur), cR = sum(rep, r => r.coste_eur), c = cT + cR;
+  const cT = sum(tro, r => r.coste_eur), cR = sum(rep, r => r.coste_eur), cA = R.almacenes ? R.almacenes.total_eur : 0, c = cT + cR + cA;
   const kgT = sum(CALC.tiendas, t => t.kg), km = sum(rutas, r => r.km);
   document.getElementById("tiles-resumen").innerHTML = [
     ["Coste total semana", eur(c), `${num(rutas.length)} rutas · ${R.camiones} camiones`],
     ["Troncal (planta → almacén)", eur(cT), `${pctf(cT / c)} del total · ${tro.length} rutas`],
     ["Reparto (almacén → tienda)", eur(cR), `${pctf(cR / c)} del total · ${rep.length} rutas`],
+    ["Almacenes", eur(cA), `${pctf(cA / c)} del total · ${R.almacenes_usados ?? "–"} abiertos` + (R.almacenes ? ` · fijo ${eur(R.almacenes.fijo_eur)} + manip. ${eur(R.almacenes.manipulacion_eur)}` : "")],
     ["€ por kg entregado", kgT ? eur2(c / kgT, 3) : "–", `${num(kgT)} kg a tiendas`],
     ["€ por km", km ? eur2(c / km) : "–", `${num(km)} km`],
     ["Coste medio por tienda", CALC.tiendas.length ? eur(c / CALC.tiendas.length) : "–", `${CALC.tiendas.length} tiendas servidas`],
@@ -724,18 +741,18 @@ function pintarResumen() {
   const pl = PLAN.plantas.map(p => {
     const t = tro.filter(r => r.planta === p.id), rr = rep.filter(r => r.planta === p.id);
     const ts = CALC.tiendas.filter(x => x.planta === p.id), kg = sum(ts, x => x.kg);
-    const cT = sum(t, r => r.coste_eur), cR = sum(rr, r => r.coste_eur);
+    const cT = sum(t, r => r.coste_eur), cR = sum(rr, r => r.coste_eur), cA = sum(ts, x => x.cAlm);
     return {id: p.id, nombre: p.nombre, almacenes: p.almacenes ?? new Set(rr.map(r => r.origen)).size, tiendas: ts.length, kg, uso: p.capacidad ? p.kg / p.capacidad : 0,
-      cT, cR, total: cT + cR, eurKg: kg ? (cT + cR) / kg : 0, kmT: sum(t, r => r.km)};
+      cT, cR, cA, total: cT + cR + cA, eurKg: kg ? (cT + cR + cA) / kg : 0, kmT: sum(t, r => r.km)};
   }).filter(p => p.total > 0);
   const maxP = Math.max(0, ...pl.map(p => p.total));
-  cards.push(["Por planta (troncal + reparto de sus almacenes)", leyenda_(ESCC), "res-pl", [
+  cards.push(["Por planta (troncal + reparto + coste de sus almacenes)", leyenda_(ESCC), "res-pl", [
     {k: "nombre", t: "Planta", f: p => `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${COL_PLANTA[p.id] || "#111"};margin-right:5px"></span><span title="${esc(p.nombre)}">${esc(p.nombre.replace(/^Planta /, "").replace(/\s*\(.*\)$/, ""))}</span>`},
     {k: "almacenes", t: "Alm.", n: 1, title: "Almacenes que repone"}, {k: "tiendas", t: "Tiendas", n: 1},
     {k: "kg", t: "kg/sem", n: 1, f: p => num(p.kg)}, {k: "uso", t: "Uso cap.", n: 1, f: p => pctf(p.uso)},
-    {k: "cT", t: "Troncal", n: 1, f: p => eur(p.cT)}, {k: "cR", t: "Reparto", n: 1, f: p => eur(p.cR)},
+    {k: "cT", t: "Troncal", n: 1, f: p => eur(p.cT)}, {k: "cR", t: "Reparto", n: 1, f: p => eur(p.cR)}, {k: "cA", t: "Almacén", n: 1, f: p => eur(p.cA)},
     {k: "total", t: "Total", n: 1, f: p => `<b>${eur(p.total)}</b>`}, {k: "eurKg", t: "€/kg", n: 1, f: p => eur2(p.eurKg, 3)},
-    {k: "_", t: "", f: p => barra([[p.cT, "var(--s1)", "Troncal"], [p.cR, "var(--s2)", "Reparto"]], maxP)}], pl, null]);
+    {k: "_", t: "", f: p => barra([[p.cT, "var(--s1)", "Troncal"], [p.cR, "var(--s2)", "Reparto"], [p.cA, "var(--s3)", "Almacén"]], maxP)}], pl, null]);
   // 5. flota
   const flota = (PLAN.flota || []).map(f => ({...f, coste: sum(rutas.filter(r => r.origen === f.origen && r.tarifa === f.tarifa), r => r.coste_eur)}));
   cards.push(["Flota por depósito y tarifa", `<span class="m">${sum(flota, f => f.camiones)} camiones · ${sum(flota, f => f.rutas)} rutas</span>`, "res-flota", [
@@ -776,8 +793,8 @@ if __name__ == "__main__":
     plan = cargar_plan(semana)
     if plan is None:
         sys.exit(f"No hay plan para {semana} en {C.SALIDAS_DIR}")
-    if any(not r.get("geometria") for r in plan["rutas"]):
-        from .osrm import añadir_geometrias
-        añadir_geometrias(plan)
+    # pide a OSRM solo los tramos que falten (rutas sin trazado o tramos que fallaron en la ejecución anterior)
+    from .osrm import añadir_geometrias
+    añadir_geometrias(plan)
     guardar(plan)
     print(f"Escrito {C.SALIDAS_DIR / semana / 'mapa.html'}")

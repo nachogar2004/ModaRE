@@ -21,7 +21,6 @@
 <div class="card">
   <h2>{{ info.nombre }}</h2>
   <p class="muted">{{ info.municipio }} · tienda {{ info.categoria }} · recepción {{ info.ventana }}</p>
-  {% if info.isla %}<p class="warn">Esta tienda no tiene acceso por carretera: la central organizará el envío marítimo aparte.</p>{% endif %}
   <p>Sugerencia según tus ventas: <b>{{ info.estim_cajas }} cajas</b> (≈ {{ '%.0f'|format(info.estim_kg) }} kg).
      Máximo por entrega: {{ info.max_cajas }} cajas. 1 caja ≈ {{ kg_caja }} kg.</p>
   {% if pedido %}

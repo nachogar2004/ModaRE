@@ -68,8 +68,7 @@ def tienda():
                 "ventana": f"{t.dias_recepcion} {t.ventana_inicio}-{t.ventana_fin}",
                 "estim_kg": est, "estim_cajas": math.ceil(est / C.KG_POR_CAJA),
                 "max_cajas": int(DATOS.P[f"max_palets_entrega_{t.categoria_tamano}"]
-                                 * DATOS.P["kg_por_palet"] / C.KG_POR_CAJA),
-                "isla": t.acceso_carretera != 1}
+                                 * DATOS.P["kg_por_palet"] / C.KG_POR_CAJA)}
         pedido = PED.de_semana(semana).get(tid)
     return render_template("tienda.html", tiendas=_tiendas(), semana=semana, tid=tid, info=info,
                            pedido=pedido, kg_caja=C.KG_POR_CAJA)
