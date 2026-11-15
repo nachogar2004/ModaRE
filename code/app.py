@@ -59,7 +59,7 @@ if not _ES_HIJO:
 def _sem(v: str | None) -> str:
     """La semana se usa en rutas de fichero: solo se acepta el formato ISO AAAA-Www."""
     v = v or PED.semana_actual()
-    if not re.fullmatch(r"\d{4}-W\d{2}", v):
+    if not re.fullmatch(r"\d{4}-W\d{2}|L-\d{4,6}", v):     # semanas (escenarios) o lotes (L-0001)
         abort(400, "Semana con formato AAAA-Www, p.ej. 2026-W47")
     return v
 

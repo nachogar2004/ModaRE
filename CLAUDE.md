@@ -248,13 +248,19 @@ renombra una columna, adaptarla allí.
 **Pedido automático** (`gestion/logistica.py`): en el día que toca, por categoría,
 `venta media diaria (4 semanas) × (días del periodo + días de seguridad) − stock − pedido en camino`;
 no se genera si pesa menos de media caja. Se generan solos con la primera petición del día (y botón en el panel admin).
-Lo pedido de lunes a viernes se entrega la semana siguiente (cierre el viernes).
+Todo pedido nuevo (automático o adicional) queda `pendiente` **sin lote** (`pedidos.semana_entrega` = NULL).
 
-**Ciclo semanal** (Admin → Planificación): 1) *cerrar semana* → pedidos `confirmado` y suma por tienda en
-`modare.pedidos` (lo que lee el optimizador); 2) *optimizar* → `gestion/optimizador.py` ejecuta `planificar(fuente="pedidos")`
+**Lotes, no semanas** (Admin → Planificación): 1) *Cerrar pedidos y calcular rutas* (`logistica.cerrar_lote`) crea un
+lote `L-0001` (tabla `lotes`, con el primer día de reparto) con TODOS los pendientes → `confirmado`, guarda el código en
+`pedidos.semana_entrega` y suma por tienda en `modare.pedidos`; los que lleguen después esperan al siguiente lote.
+El código del lote es la clave que antes era la semana (viajes, reposiciones, planes, trabajos: columnas `semana`).
+Datos anteriores: cada semana `2026-W48` es un lote con ese código (migración 0004). 2) *Calcular* →
+`gestion/optimizador.py` ejecuta `planificar(fuente="pedidos", inicio=lote.inicio)`: con `inicio`, los días del plan son
+los **laborables** desde esa fecha (`Datos.dias_semana`, `datos.dias_laborables`/`dias_desde_rango`), sin fines de semana
+y respetando los días de recepción reales; sin `inicio`, la semana L-V de siempre. `planificar` (que lee la red y los parámetros de la base en ese momento)
 (que lee la red y los parámetros de la base en ese momento) e **importa el plan**: crea los viajes, asigna a cada ruta
 un camión libre de su base (mismo tipo o el más pequeño con capacidad; editable a mano) y crea una reposición por almacén
-con la mezcla de prendas de sus pedidos; 3) planta expide → almacén recibe (+cajas) → almacén carga (−cajas) →
+con la mezcla de prendas de sus pedidos; *Deshacer lote* (`reabrir_lote`) devuelve sus pedidos a la bolsa; 3) planta expide → almacén recibe (+cajas) → almacén carga (−cajas) →
 tienda recibe (+prendas). **`gestion/optimizador.py` es el único módulo que conoce la librería de rutas**: si cambia, solo se adapta ese.
 
 Supuestos SINTÉTICOS de la semilla (editables en la app): peso y precio por prenda de cada categoría, stock inicial

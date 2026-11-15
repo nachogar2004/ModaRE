@@ -1,9 +1,11 @@
-"""Reglas de negocio: pedidos automáticos, ventas, movimientos de stock y cierre de semana.
+"""Reglas de negocio: pedidos automáticos, ventas, movimientos de stock y lotes de planificación.
 
-Ciclo de una semana W (los pedidos se cierran el viernes de la semana anterior):
-  1. Pedidos automáticos (según ventas y frecuencia de cada tienda) + adicionales  -> estado 'pendiente'
-  2. Cierre de la semana W   -> 'confirmado' y se vuelcan a la tabla que lee el optimizador (modare.pedidos)
-  3. Optimizar e importar el plan (gestion.optimizador) -> rutas, camiones y reposiciones -> 'planificado'
+Ciclo (sin esperar a ninguna semana):
+  1. Pedidos automáticos (según ventas y frecuencia de cada tienda) + adicionales -> 'pendiente', sin lote:
+     se acumulan en la bolsa de «pendientes de planificar»
+  2. El admin cierra un lote cuando quiere (cerrar_lote): todos los pendientes entran en él -> 'confirmado' y se
+     vuelcan a la tabla que lee el optimizador (modare.pedidos). Los que lleguen después esperan al siguiente lote.
+  3. Optimizar e importar el plan del lote (gestion.optimizador) -> rutas, camiones y reposiciones -> 'planificado'
   4. Planta expide la reposición -> almacén la recibe (cajas) -> almacén carga el pedido ('en_reparto')
      -> la tienda confirma la recepción ('entregado') y su stock sube.
 """
@@ -19,7 +21,7 @@ from sqlalchemy import func
 from modare import config as C
 from modare import pedidos as PED
 
-from .modelos import (Ajuste, Almacen, CamionReparto, CamionTroncal, Categoria, LineaPedido, MovimientoStock,
+from .modelos import (Ajuste, Almacen, CamionReparto, CamionTroncal, Categoria, LineaPedido, Lote, MovimientoStock,
                       Pedido, Planta, Reposicion, StockPlanta, StockTienda, Tienda, Venta, Viaje, ahora, db,
                       semana_iso)
 
@@ -29,17 +31,8 @@ MIN_KG_PEDIDO_AUTO = C.KG_POR_CAJA / 2   # por debajo de media caja no se genera
 MAX_DIAS_RECUPERAR = 31
 ACTIVOS = ("pendiente", "confirmado", "planificado", "en_reparto")
 MAX_UNIDADES_LINEA = 20000            # tope por prenda en un pedido/venta: evita errores de tecleo (2000 → 20000000)
-RE_SEMANA = re.compile(r"\d{4}-W(0[1-9]|[1-4]\d|5[0-3])")
 
 
-def validar_semana(semana: str) -> str:
-    if not RE_SEMANA.fullmatch(semana or ""):
-        raise ErrorNegocio("Semana no válida: usa el formato AAAA-Www (p. ej. 2026-W48).")
-    try:
-        lunes_de(semana)
-    except ValueError:
-        raise ErrorNegocio(f"La semana {semana} no existe.")
-    return semana
 
 
 def validar_lineas(lineas: dict[str, int]) -> dict[str, int]:
@@ -54,21 +47,10 @@ class ErrorNegocio(Exception):
 
 
 # ----------------------------------------------------------------------------- calendario
-def semana_entrega_para(fecha: dt.date) -> str:
-    """Los pedidos se cierran el viernes: lo pedido de lunes a viernes llega la semana siguiente,
-    lo pedido en fin de semana, la otra."""
-    lunes_sig = fecha + dt.timedelta(days=7 - fecha.weekday())
-    if fecha.weekday() >= 5:
-        lunes_sig += dt.timedelta(days=7)
-    return semana_iso(lunes_sig)
 
 
-def semana_cerrada(semana: str) -> bool:
-    return Ajuste.get(f"cerrada:{semana}") == "1"
 
 
-def lunes_de(semana: str) -> dt.date:
-    return dt.date.fromisoformat(f"{semana}-1")
 
 
 def toca_pedido(t: Tienda, fecha: dt.date) -> bool:
@@ -140,24 +122,21 @@ def generar_automaticos(hasta: dt.date | None = None, log=lambda *a: None) -> in
     desde = max(desde, hasta - dt.timedelta(days=MAX_DIAS_RECUPERAR))
     creados = 0
     tiendas = Tienda.query.filter_by(activa=True, pedido_auto_activo=True).all()
-    # si la app ha estado días sin abrirse, lo atrasado se entrega en la primera semana aún abierta, no en una pasada
-    primera = semana_entrega_para(dt.date.today())
     f = desde
     while f <= hasta:
-        semana = max(semana_entrega_para(f), primera)
-        if not semana_cerrada(semana):
-            for t in tiendas:
-                if not toca_pedido(t, f):
-                    continue
-                if Pedido.query.filter_by(tienda_id=t.id, tipo="automatico", fecha_generacion=f).first():
-                    continue
-                lineas = propuesta_automatica(t, f)
-                if kg_de(lineas) < MIN_KG_PEDIDO_AUTO:
-                    continue
-                _crear_pedido(t.id, "automatico", lineas, semana, fecha=f,
-                              comentario=f"Automático {t.frecuencia_pedido} por ventas")
-                db.session.flush()       # para que en_camino() vea este pedido en el siguiente día
-                creados += 1
+        for t in tiendas:
+            if not toca_pedido(t, f):
+                continue
+            if Pedido.query.filter_by(tienda_id=t.id, tipo="automatico", fecha_generacion=f).first():
+                continue
+            lineas = propuesta_automatica(t, f)
+            if kg_de(lineas) < MIN_KG_PEDIDO_AUTO:
+                continue
+            # sin lote: se acumula en «pendientes de planificar» hasta que el admin cierre el siguiente lote
+            _crear_pedido(t.id, "automatico", lineas, None, fecha=f,
+                          comentario=f"Automático {t.frecuencia_pedido} por ventas")
+            db.session.flush()       # para que en_camino() vea este pedido en el siguiente día
+            creados += 1
         f += dt.timedelta(days=1)
     Ajuste.set("auto_hasta", hasta.isoformat())
     db.session.commit()
@@ -166,25 +145,19 @@ def generar_automaticos(hasta: dt.date | None = None, log=lambda *a: None) -> in
     return creados
 
 
-def crear_pedido_adicional(tienda: Tienda, lineas: dict[str, int], semana: str, comentario: str,
-                           urgente: bool, usuario) -> Pedido:
+def crear_pedido_adicional(tienda: Tienda, lineas: dict[str, int], comentario: str, urgente: bool, usuario) -> Pedido:
+    """Pedido extra de la tienda: queda pendiente y entra en el próximo lote que cierre el admin."""
     lineas = validar_lineas({c: u for c, u in lineas.items() if u > 0})
     if not lineas:
         raise ErrorNegocio("Indica al menos una prenda.")
-    validar_semana(semana)
-    if semana_cerrada(semana):
-        raise ErrorNegocio(f"La semana {semana} ya está cerrada: elige una semana posterior.")
-    if semana < semana_entrega_para(dt.date.today()):
-        raise ErrorNegocio(f"Los pedidos para {semana} ya se cerraron. La primera semana disponible es "
-                           f"{semana_entrega_para(dt.date.today())}.")
-    p = _crear_pedido(tienda.id, "adicional", lineas, semana, comentario=comentario, urgente=urgente, usuario=usuario)
+    p = _crear_pedido(tienda.id, "adicional", lineas, None, comentario=comentario, urgente=urgente, usuario=usuario)
     db.session.commit()
     return p
 
 
 def cancelar_pedido(p: Pedido):
     if p.estado != "pendiente":
-        raise ErrorNegocio("Solo se pueden cancelar pedidos pendientes (la semana aún no se ha cerrado).")
+        raise ErrorNegocio("Solo se pueden cancelar pedidos pendientes (que aún no han entrado en un lote).")
     p.estado = "cancelado"
     db.session.commit()
 
@@ -261,16 +234,26 @@ def ajustar_cajas_almacen(a: Almacen, delta: int, motivo: str, usuario) -> list[
 
 
 # ----------------------------------------------------------------------------- cierre de semana
-def cerrar_semana(semana: str) -> dict:
-    """Confirma los pedidos pendientes de la semana y vuelca a la tabla que lee el optimizador TODOS los de la
-    semana (también los ya planificados: si se vuelve a cerrar tras importar un plan no deben perderse)."""
-    validar_semana(semana)
-    generar_automaticos()
-    pedidos = Pedido.query.filter(Pedido.semana_entrega == semana,
-                                  Pedido.estado.in_(("pendiente", "confirmado", "planificado"))).all()
-    for p in pedidos:
-        if p.estado == "pendiente":
-            p.estado = "confirmado"
+def pendientes_de_planificar():
+    """La bolsa: pedidos pendientes que aún no están en ningún lote."""
+    return (Pedido.query.filter(Pedido.estado == "pendiente", Pedido.semana_entrega.is_(None))
+            .order_by(Pedido.urgente.desc(), Pedido.creado).all())
+
+
+def siguiente_dia_laborable(desde: dt.date | None = None) -> dt.date:
+    f = (desde or dt.date.today()) + dt.timedelta(days=1)
+    while f.weekday() >= 5:
+        f += dt.timedelta(days=1)
+    return f
+
+
+def _nuevo_codigo() -> str:
+    nums = [int(c[2:]) for (c,) in db.session.query(Lote.codigo) if re.fullmatch(r"L-\d+", c)]
+    return f"L-{max(nums, default=0) + 1:04d}"
+
+
+def _volcar_al_optimizador(codigo: str, pedidos: list[Pedido]):
+    """Suma por tienda los pedidos del lote en la tabla que lee el optimizador (modare.pedidos)."""
     por_tienda = defaultdict(lambda: {"kg": 0.0, "n": 0, "coment": []})
     for p in pedidos:
         x = por_tienda[p.tienda_id]
@@ -278,27 +261,55 @@ def cerrar_semana(semana: str) -> dict:
         x["n"] += 1
         if p.comentario and p.tipo == "adicional":
             x["coment"].append(p.comentario)
-    PED.borrar_semana(semana)
+    PED.borrar_semana(codigo)
     for tid, x in por_tienda.items():
         if x["kg"] > 0:
-            PED.guardar(semana, tid, cajas_de_kg(x["kg"]), round(x["kg"], 1),
+            PED.guardar(codigo, tid, cajas_de_kg(x["kg"]), round(x["kg"], 1),
                         f"{x['n']} pedido(s) app gestión. " + " | ".join(x["coment"]))
-    Ajuste.set(f"cerrada:{semana}", "1")
-    db.session.commit()
-    return {"pedidos": len(pedidos), "tiendas": len(por_tienda), "kg": round(sum(x["kg"] for x in por_tienda.values()), 1)}
+    return por_tienda
 
 
-def reabrir_semana(semana: str):
-    if Viaje.query.filter(Viaje.semana == semana, Viaje.estado != "planificado").first():
-        raise ErrorNegocio("Ya hay viajes en curso o completados en esa semana: no se puede reabrir.")
-    if Reposicion.query.filter(Reposicion.semana == semana, Reposicion.estado != "planificada").first():
-        raise ErrorNegocio("Ya hay reposiciones expedidas en esa semana: no se puede reabrir.")
-    Pedido.query.filter(Pedido.semana_entrega == semana, Pedido.estado.in_(("confirmado", "planificado"))) \
-        .update({"estado": "pendiente", "viaje_id": None}, synchronize_session=False)
-    Reposicion.query.filter_by(semana=semana).delete()
-    Viaje.query.filter_by(semana=semana).delete()
-    Ajuste.set(f"cerrada:{semana}", "0")
-    db.session.commit()
+def cerrar_lote(inicio: dt.date | None = None, usuario=None) -> Lote:
+    """Cierra un lote con TODOS los pedidos pendientes de este momento. Las rutas empiezan el día `inicio`
+    (por defecto, el siguiente día laborable). Los pedidos que lleguen después esperan al siguiente lote."""
+    generar_automaticos()
+    inicio = inicio or siguiente_dia_laborable()
+    if inicio < dt.date.today():
+        raise ErrorNegocio("El primer día de reparto no puede ser anterior a hoy.")
+    if inicio.weekday() >= 5:
+        raise ErrorNegocio("El primer día de reparto tiene que ser laborable (de lunes a viernes).")
+    pedidos = pendientes_de_planificar()
+    if not pedidos:
+        raise ErrorNegocio("No hay pedidos pendientes de planificar.")
+    lote = Lote(codigo=_nuevo_codigo(), inicio=inicio, creado_por=usuario)
+    db.session.add(lote)
+    for p in pedidos:
+        p.semana_entrega, p.estado = lote.codigo, "confirmado"
+    db.session.commit()       # primero el lote; luego la tabla del optimizador (otra conexión: no a la vez)
+    _volcar_al_optimizador(lote.codigo, pedidos)
+    return lote
+
+
+def reabrir_lote(codigo: str):
+    """Deshace un lote que aún no ha empezado a moverse: sus pedidos vuelven a la bolsa de pendientes."""
+    if Viaje.query.filter(Viaje.semana == codigo, Viaje.estado != "planificado").first():
+        raise ErrorNegocio("Ya hay viajes en curso o completados en este lote: no se puede deshacer.")
+    if Reposicion.query.filter(Reposicion.semana == codigo, Reposicion.estado != "planificada").first():
+        raise ErrorNegocio("Ya hay reposiciones expedidas en este lote: no se puede deshacer.")
+    from modare import bd as BD
+    if BD.estado_trabajo(codigo).get("estado") in ("calculando", "pendiente"):
+        raise ErrorNegocio("Se están calculando las rutas de este lote: espera a que terminen.")
+    Pedido.query.filter(Pedido.semana_entrega == codigo, Pedido.estado.in_(("confirmado", "planificado"))) \
+        .update({"estado": "pendiente", "viaje_id": None, "semana_entrega": None, "almacen_id": None},
+                synchronize_session=False)
+    Reposicion.query.filter_by(semana=codigo).delete()
+    Viaje.query.filter_by(semana=codigo).delete()
+    lote = db.session.get(Lote, codigo)
+    if lote and not Pedido.query.filter_by(semana_entrega=codigo).first():
+        db.session.delete(lote)
+    db.session.commit()       # después, lo de la librería (otra conexión)
+    PED.borrar_semana(codigo)
+    BD.borrar_lote(codigo)
 
 
 # ----------------------------------------------------------------------------- operaciones físicas

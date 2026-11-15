@@ -336,7 +336,7 @@ function pintarGantt() {
     `<i style="background:rgba(30,40,80,.12)"></i>noche (19–06 h)</span></h2>`;
   let eje = "", noches = `<div class="g-night" style="left:0;width:${pct(360)}"></div>`;
   for (let d = 0; d < dias; d++) {
-    eje += `<span style="left:${pct(d * 1440)}">${DIAS[d % 7]}</span>`;
+    eje += `<span style="left:${pct(d * 1440)}">${DIAS[((PLAN.resumen.dias_semana || [])[d] ?? d) % 7]}</span>`;
     if (d > 0) noches += `<div class="g-mid" style="left:${pct(d * 1440)}"></div>`;
     const ini = d * 1440 + 1140;  // 19:00 -> 06:00
     noches += `<div class="g-night" style="left:${pct(ini)};width:${pct(Math.min(660, total - ini))}"></div>`;

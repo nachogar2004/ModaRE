@@ -24,7 +24,7 @@ from . import logistica as L
 from . import optimizador as OPT
 from . import rol_requerido
 from .modelos import (DIAS_SEMANA, ESTADOS_CAMION, ESTADOS_PEDIDO, FRECUENCIAS, ROLES, Ajuste, Almacen, CamionReparto,
-                      CamionTroncal, Categoria, MovimientoStock, Parametro, Pedido, Planta, Reposicion, StockPlanta,
+                      CamionTroncal, Categoria, Lote, MovimientoStock, Parametro, Pedido, Planta, Reposicion, StockPlanta,
                       StockTienda, Tarifa, Tienda, TipoVehiculo, Usuario, Venta, Viaje, db)
 from .semilla import _slug, capacidad_vehiculos
 
@@ -583,16 +583,15 @@ def _tiene_historial(ent: str, obj) -> bool:
 # ----------------------------------------------------------------------------- panel y consultas
 @bp.route("/")
 def panel():
-    hoy = dt.date.today()
-    sem = L.semana_entrega_para(hoy)
+    pendientes = L.pendientes_de_planificar()
+    ultimo = Lote.query.order_by(Lote.creado.desc(), Lote.codigo.desc()).first()
     kpi = {
         "tiendas": Tienda.query.filter_by(activa=True).count(),
         "plantas": Planta.query.filter_by(activa=True).count(),
         "almacenes": Almacen.query.filter_by(activo=True).count(),
         "camiones_t": CamionTroncal.query.filter(CamionTroncal.estado != "baja").count(),
         "camiones_r": CamionReparto.query.filter(CamionReparto.estado != "baja").count(),
-        "pedidos_sem": Pedido.query.filter(Pedido.semana_entrega == sem, Pedido.estado != "cancelado").count(),
-        "kg_sem": sum(p.kg for p in Pedido.query.filter(Pedido.semana_entrega == sem, Pedido.estado != "cancelado")),
+        "pendientes": len(pendientes), "kg_pendientes": sum(p.kg for p in pendientes),
         "en_reparto": Pedido.query.filter_by(estado="en_reparto").count(),
         "stock_almacenes": db.session.query(func.sum(Almacen.stock_cajas)).filter(Almacen.activo.is_(True)).scalar() or 0,
         "max_almacenes": db.session.query(func.sum(Almacen.stock_max_cajas)).filter(Almacen.activo.is_(True)).scalar() or 0,
@@ -601,17 +600,21 @@ def panel():
     almacenes = Almacen.query.filter_by(activo=True).order_by(Almacen.stock_cajas.desc()).all()
     adicionales = (Pedido.query.filter(Pedido.tipo == "adicional", Pedido.estado != "cancelado")
                    .order_by(Pedido.urgente.desc(), Pedido.creado.desc()).limit(6).all())
-    return render_template("gestion/admin_panel.html", kpi=kpi, sem=sem, plantas=plantas, almacenes=almacenes,
-                           alertas=L.alertas("admin"), cerrada=L.semana_cerrada(sem), adicionales=adicionales,
-                           hay_plan=Viaje.query.filter_by(semana=sem).first() is not None)
+    return render_template("gestion/admin_panel.html", kpi=kpi, plantas=plantas, almacenes=almacenes,
+                           alertas=L.alertas("admin"), adicionales=adicionales, ultimo=ultimo,
+                           ultimo_trabajo=BD.estado_trabajo(ultimo.codigo) if ultimo else {},
+                           ultimo_rutas=Viaje.query.filter_by(semana=ultimo.codigo).count() if ultimo else 0)
 
 
 @bp.route("/pedidos")
 def pedidos():
     q = Pedido.query
-    f = {k: request.args.get(k, "") for k in ("semana", "estado", "tipo", "tienda")}
-    if f["semana"]:
-        q = q.filter_by(semana_entrega=f["semana"])
+    f = {k: request.args.get(k, "") for k in ("lote", "estado", "tipo", "tienda")}
+    f["lote"] = f["lote"] or request.args.get("semana", "")
+    if f["lote"] == "sin":
+        q = q.filter(Pedido.semana_entrega.is_(None))          # pendientes de planificar
+    elif f["lote"]:
+        q = q.filter_by(semana_entrega=f["lote"])
     if f["estado"]:
         q = q.filter_by(estado=f["estado"])
     if f["tipo"]:
@@ -619,8 +622,8 @@ def pedidos():
     if f["tienda"]:
         q = q.filter(Pedido.tienda_id.ilike(f"%{f['tienda']}%"))
     filas = q.order_by(Pedido.creado.desc(), Pedido.id.desc()).limit(500).all()
-    semanas = [s for (s,) in db.session.query(Pedido.semana_entrega).distinct().order_by(Pedido.semana_entrega.desc())]
-    return render_template("gestion/admin_pedidos.html", filas=filas, f=f, semanas=semanas)
+    lotes = [c for (c,) in db.session.query(Lote.codigo).order_by(Lote.creado.desc(), Lote.codigo.desc())]
+    return render_template("gestion/admin_pedidos.html", filas=filas, f=f, lotes=lotes)
 
 
 @bp.route("/movimientos")
@@ -641,92 +644,126 @@ def automaticos():
 
 
 # ----------------------------------------------------------------------------- planificación semanal
-def _sem(v):
-    v = v or L.semana_entrega_para(dt.date.today())
-    if not re.fullmatch(r"\d{4}-W\d{2}", v):
-        abort(400, "Semana con formato AAAA-Www")
+RE_LOTE = re.compile(r"L-\d{4,6}|\d{4}-W\d{2}")   # lotes (L-0001) y, de datos anteriores, semanas (2026-W48)
+
+
+def _lote(v: str | None, obligatorio: bool = True) -> str | None:
+    v = (v or "").strip()
+    if not v:
+        if obligatorio:
+            abort(400, "Falta el lote")
+        return None
+    if not RE_LOTE.fullmatch(v):
+        abort(400, "Lote no válido (formato L-0001)")
     return v
+
+
+def _resumen_pedidos(peds) -> dict:
+    return {"n": len(peds), "kg": round(sum(p.kg for p in peds), 1), "cajas": sum(p.cajas for p in peds),
+            "tiendas": len({p.tienda_id for p in peds}), "urgentes": sum(1 for p in peds if p.urgente)}
 
 
 @bp.route("/planificacion")
 def planificacion():
-    semana = _sem(request.args.get("semana"))
-    peds = Pedido.query.filter(Pedido.semana_entrega == semana, Pedido.estado != "cancelado").all()
-    resumen = {e: 0 for e in ESTADOS_PEDIDO}
-    for p in peds:
-        resumen[p.estado] += 1
-    viajes = Viaje.query.filter_by(semana=semana).order_by(Viaje.escalon.desc(), Viaje.origen, Viaje.t_salida).all()
-    reps = Reposicion.query.filter_by(semana=semana).order_by(Reposicion.planta_id, Reposicion.almacen_id).all()
-    flota_t = {}
-    for c in CamionTroncal.query.filter(CamionTroncal.estado != "baja"):
-        flota_t.setdefault(c.planta_id, []).append(c)
-    flota_r = {}
-    for c in CamionReparto.query.filter(CamionReparto.estado != "baja"):
-        flota_r.setdefault(c.almacen_id, []).append(c)
-    lunes = L.lunes_de(semana)
-    # semanas que tienen pedidos activos (para saltar a ellas: la página abre por defecto la próxima entrega)
-    con_pedidos = (db.session.query(Pedido.semana_entrega, Pedido.estado, func.count())
-                   .filter(Pedido.estado.in_(L.ACTIVOS)).group_by(Pedido.semana_entrega, Pedido.estado).all())
-    semanas_pedidos: dict[str, dict] = {}
-    for sem_, est_, n_ in con_pedidos:
-        semanas_pedidos.setdefault(sem_, {})[est_] = n_
+    """Pedidos acumulados (sin lote) + lotes. Se cierra un lote cuando se quiere, sin esperar a ninguna semana."""
+    pendientes = L.pendientes_de_planificar()
+    lotes = Lote.query.order_by(Lote.creado.desc(), Lote.codigo.desc()).limit(30).all()
+    codigo = _lote(request.args.get("lote") or request.args.get("semana"), obligatorio=False)
+    if codigo is None and lotes and not pendientes:
+        codigo = lotes[0].codigo                     # sin pendientes: se muestra el último lote
+    lote = db.session.get(Lote, codigo) if codigo else None
+    ctx = {}
+    if codigo:
+        peds = Pedido.query.filter(Pedido.semana_entrega == codigo, Pedido.estado != "cancelado").all()
+        resumen = {e: 0 for e in ESTADOS_PEDIDO}
+        for p in peds:
+            resumen[p.estado] += 1
+        flota_t, flota_r = {}, {}
+        for c in CamionTroncal.query.filter(CamionTroncal.estado != "baja"):
+            flota_t.setdefault(c.planta_id, []).append(c)
+        for c in CamionReparto.query.filter(CamionReparto.estado != "baja"):
+            flota_r.setdefault(c.almacen_id, []).append(c)
+        ctx = dict(peds=peds, resumen=resumen, tot=_resumen_pedidos(peds),
+                   viajes=Viaje.query.filter_by(semana=codigo).order_by(Viaje.escalon.desc(), Viaje.origen,
+                                                                           Viaje.t_salida).all(),
+                   reps=Reposicion.query.filter_by(semana=codigo).order_by(Reposicion.planta_id,
+                                                                           Reposicion.almacen_id).all(),
+                   plan=cargar_plan(codigo), trabajo=BD.estado_trabajo(codigo), flota_t=flota_t, flota_r=flota_r)
+    # resumen de cada lote para la lista
+    info_lotes = []
+    for lt in lotes:
+        ps = Pedido.query.filter(Pedido.semana_entrega == lt.codigo, Pedido.estado != "cancelado").all()
+        info_lotes.append({"lote": lt, **_resumen_pedidos(ps), "trabajo": BD.estado_trabajo(lt.codigo),
+                           "rutas": Viaje.query.filter_by(semana=lt.codigo).count(),
+                           "entregados": sum(1 for p in ps if p.estado == "entregado")})
     return render_template(
-        "gestion/admin_planificacion.html", semana=semana, peds=peds, resumen=resumen,
-        sem_ant=L.semana_iso(lunes - dt.timedelta(days=7)), sem_sig=L.semana_iso(lunes + dt.timedelta(days=7)),
-        sem_actual=L.semana_entrega_para(dt.date.today()), semanas_pedidos=dict(sorted(semanas_pedidos.items())),
-        kg=round(sum(p.kg for p in peds), 1), cajas=sum(p.cajas for p in peds),
-        tiendas=len({p.tienda_id for p in peds}), cerrada=L.semana_cerrada(semana), viajes=viajes, reps=reps,
-        plan=cargar_plan(semana), trabajo=BD.estado_trabajo(semana), flota_t=flota_t, flota_r=flota_r,
-        dist=_estado_distancias(),
-        externo=OPT.EXTERNO, trabajador=BD.trabajador_conectado() if OPT.EXTERNO else None)
+        "gestion/admin_planificacion.html", codigo=codigo, lote=lote, pendientes=pendientes,
+        pend=_resumen_pedidos(pendientes), lotes=info_lotes, inicio_defecto=L.siguiente_dia_laborable(),
+        hoy=dt.date.today(), dist=_estado_distancias(),
+        externo=OPT.EXTERNO, trabajador=BD.trabajador_conectado() if OPT.EXTERNO else None, **ctx)
 
 
 @bp.post("/planificacion/cerrar")
 def cerrar():
-    semana = _sem(request.form.get("semana"))
-    r = L.cerrar_semana(semana)
-    flash(f"Semana {semana} cerrada: {r['pedidos']} pedidos de {r['tiendas']} tiendas ({r['kg']:,.0f} kg) "
-          f"enviados al optimizador.")
-    return redirect(url_for("admin.planificacion", semana=semana))
+    """Cierra un lote con todos los pendientes y lanza el cálculo de sus rutas."""
+    try:
+        inicio = dt.date.fromisoformat(request.form.get("inicio") or L.siguiente_dia_laborable().isoformat())
+    except ValueError:
+        flash("Fecha de inicio no válida.", "error")
+        return redirect(url_for("admin.planificacion"))
+    try:
+        lote = L.cerrar_lote(inicio, current_user)
+    except L.ErrorNegocio as e:
+        flash(str(e), "error")
+        return redirect(url_for("admin.planificacion"))
+    r = _resumen_pedidos(lote.pedidos)
+    lanzado = OPT.lanzar(current_app._get_current_object(), lote.codigo,
+                         asignacion=request.form.get("asignacion", "optimo"),
+                         plantas_futuras=bool(request.form.get("plantas_futuras")))
+    flash(f"Lote {lote.codigo} cerrado: {r['n']} pedidos de {r['tiendas']} tiendas ({r['kg']:,.0f} kg), reparto desde "
+          f"el {lote.inicio:%d/%m}. " + ("Calculando sus rutas…" if lanzado else "No se pudo lanzar el cálculo."))
+    return redirect(url_for("admin.planificacion", lote=lote.codigo))
 
 
 @bp.post("/planificacion/reabrir")
 def reabrir():
-    semana = _sem(request.form.get("semana"))
+    codigo = _lote(request.form.get("lote"))
     try:
-        L.reabrir_semana(semana)
-        flash(f"Semana {semana} reabierta: los pedidos vuelven a estar pendientes.")
+        L.reabrir_lote(codigo)
+        flash(f"Lote {codigo} deshecho: sus pedidos vuelven a «pendientes de planificar».")
+        return redirect(url_for("admin.planificacion"))
     except L.ErrorNegocio as e:
         flash(str(e), "error")
-    return redirect(url_for("admin.planificacion", semana=semana))
+        return redirect(url_for("admin.planificacion", lote=codigo))
 
 
 @bp.post("/planificacion/optimizar")
 def optimizar():
-    semana = _sem(request.form.get("semana"))
-    if not L.semana_cerrada(semana):
-        flash("Cierra primero la semana para fijar los pedidos.", "error")
-    elif not OPT.lanzar(current_app._get_current_object(), semana,
+    """Vuelve a calcular las rutas de un lote ya cerrado."""
+    codigo = _lote(request.form.get("lote"))
+    if not db.session.get(Lote, codigo):
+        flash("Ese lote no existe.", "error")
+    elif not OPT.lanzar(current_app._get_current_object(), codigo,
                         asignacion=request.form.get("asignacion", "optimo"),
                         plantas_futuras=bool(request.form.get("plantas_futuras"))):
-        flash("Ya hay una optimización en marcha para esta semana.", "error")
-    return redirect(url_for("admin.planificacion", semana=semana))
+        flash("Ya hay un cálculo en marcha para este lote.", "error")
+    return redirect(url_for("admin.planificacion", lote=codigo))
 
 
 @bp.get("/planificacion/estado")
 def estado():
-    return jsonify(BD.estado_trabajo(_sem(request.args.get("semana"))))
+    return jsonify(BD.estado_trabajo(_lote(request.args.get("lote") or request.args.get("semana"))))
 
 
 @bp.post("/planificacion/importar")
 def importar():
-    semana = _sem(request.form.get("semana"))
+    codigo = _lote(request.form.get("lote"))
     try:
-        flash(OPT.importar_plan(semana))
+        flash(OPT.importar_plan(codigo))
     except (FileNotFoundError, RuntimeError) as e:
         db.session.rollback()
         flash(str(e), "error")
-    return redirect(url_for("admin.planificacion", semana=semana))
+    return redirect(url_for("admin.planificacion", lote=codigo))
 
 
 @bp.post("/viaje/<int:vid>/camion")
@@ -735,7 +772,7 @@ def camion_viaje(vid):
     cid = request.form.get("camion_id")
     OPT.reasignar_camion(v, int(cid) if cid else None)
     flash(f"Camión de la ruta {v.nombre} actualizado.")
-    return redirect(url_for("admin.planificacion", semana=v.semana) + "#viajes")
+    return redirect(url_for("admin.planificacion", lote=v.semana) + "#viajes")
 
 
 # ----------------------------------------------------------------------------- distancias por carretera

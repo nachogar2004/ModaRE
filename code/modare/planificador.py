@@ -11,6 +11,7 @@ cubre el reparto de la semana W+1, así que los dos escalones se planifican a la
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import json
 import math
 import os
@@ -21,7 +22,7 @@ from concurrent.futures import ProcessPoolExecutor
 from . import config as C
 from . import pedidos as PED
 from .asignacion import asignar, plantas_activas, tiendas_sin_almacen
-from .datos import cargar_datos, construir_visitas, construir_visitas_troncal, demanda_estimada
+from .datos import cargar_datos, construir_visitas, construir_visitas_troncal, demanda_estimada, dias_laborables
 from .osrm import añadir_geometrias
 from .simulacion import flota_necesaria, simular_con_reajuste
 from .vrp import PORTAFOLIO, resolver_planta
@@ -88,19 +89,27 @@ def _kpis(rutas: list[dict]) -> dict:
 
 def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: str = "optimo",
                plantas_futuras: bool = False, segundos: int = 30, precio_co2: float = C.PRECIO_CO2_EUR_T,
-               solo_muestra: bool = False, paralelo: bool = True, almacenes: str = "todos", log=print) -> dict:
+               solo_muestra: bool = False, paralelo: bool = True, almacenes: str = "todos",
+               inicio: "dt.date | None" = None, log=print) -> dict:
     """
     fuente: 'pedidos'    -> solo lo que han pedido las tiendas en la app
             'estimacion' -> demanda estimada por ventas (sin app)
             'mixto'      -> pedido si existe; si no, estimación (por defecto)
     segundos: tiempo de búsqueda por planta en el troncal (los almacenes usan menos, según su tamaño)
     almacenes: 'todos' -> un almacén por provincia, todos abiertos (requisito); 'optimo' -> el modelo decide cuáles abrir
+    inicio: primer día de reparto (lotes). Los días del plan son los laborables siguientes (sin fines de semana) y se
+            respetan los días de recepción reales de cada tienda. Sin inicio: semana de lunes a viernes, como antes.
     """
     t0 = time.time()
     if int(os.environ.get("MODARE_PROCESOS", 0) or 0) == 1:
         paralelo = False    # un solo proceso: una configuración por depósito (como --secuencial), si no tarda 3-5 veces más
     semana = semana or PED.semana_actual()
     d = cargar_datos()
+    fechas = []
+    if inicio is not None:
+        # un día más que el horizonte: el troncal puede volver a planta el día siguiente al último de reparto
+        fechas = dias_laborables(inicio, int(d.P["horizonte_planificacion_dias"]) + 2)
+        d.dias_semana = [f.weekday() for f in fechas]
     estim = demanda_estimada(d, PED.num_semana(semana))
     peds = PED.de_semana(semana)
     if fuente == "pedidos":
@@ -189,6 +198,8 @@ def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: 
     al = d.almacenes.set_index("id_almacen")
     resumen = {
         "semana": semana, "fuente": fuente, "asignacion": asignacion, "segundos_por_planta": segundos,
+        "inicio": fechas[0].isoformat() if fechas else None, "dias_semana": d.dias_semana or None,
+        "fechas": [f.isoformat() for f in fechas] or None,
         "precio_co2_eur_t": precio_co2,
         "tiendas_con_demanda": len(demanda), "pedidos_app": len(peds), "visitas": len(visitas),
         "almacenes_modo": almacenes, "almacenes_usados": len(uso["almacenes"]),

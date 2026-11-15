@@ -54,14 +54,11 @@
 </section>
 
 <section class="tab-panel card" id="tab-pedir" hidden>
-  <div class="card-head"><h2>Pedido adicional</h2><span class="small">Se suma al automático. Las cajas van mixtas (≈ {{ KG_POR_CAJA }} kg).</span></div>
+  <div class="card-head"><h2>Pedido adicional</h2><span class="small">Se suma a los pendientes y entra en la próxima planificación. Las cajas van mixtas (≈ {{ KG_POR_CAJA }} kg).</span></div>
   <form method="post" action="{{ url_for('tienda.pedido', tid=t.id) }}">{{ csrf() }}
     <div class="formgrid">
-      <div><label for="semana">Semana de entrega</label>
-        <select id="semana" name="semana">{% for s in semanas %}<option>{{ s }}</option>{% endfor %}</select>
-        <div class="ayuda">Los pedidos de cada semana se cierran el viernes anterior.</div></div>
       <div><label>&nbsp;</label><label class="check"><input type="checkbox" name="urgente"> Marcar como urgente</label>
-        <div class="ayuda">Se señala a la central; el reparto sigue la planificación semanal.</div></div>
+        <div class="ayuda">Se señala a la central para que lo tenga en cuenta al planificar.</div></div>
     </div>
     <label>Prendas que necesitas</label>
     {{ rejilla(m, None, input='p', placeholder='0', total_vivo=True) }}
@@ -73,15 +70,15 @@
 
 <section class="tab-panel card flush" id="tab-pedidos" hidden>
   <div class="card-head"><h2>Mis pedidos</h2>
-    <div class="search">{{ icono('search') }}<input type="search" placeholder="Buscar pedido, semana, estado…" data-filter="#t-pedidos" aria-label="Buscar pedidos"></div></div>
+    <div class="search">{{ icono('search') }}<input type="search" placeholder="Buscar pedido, lote, estado…" data-filter="#t-pedidos" aria-label="Buscar pedidos"></div></div>
   <div class="table-wrap mt"><table id="t-pedidos">
-    <thead><tr><th>Pedido</th><th>Tipo</th><th>Semana</th><th>Estado</th><th class="n">Prendas</th><th class="n">Cajas</th><th>Ruta</th><th>Contenido</th><th></th></tr></thead>
+    <thead><tr><th>Pedido</th><th>Tipo</th><th>Lote</th><th>Estado</th><th class="n">Prendas</th><th class="n">Cajas</th><th>Ruta</th><th>Contenido</th><th></th></tr></thead>
     <tbody>
     {% for p in pedidos %}
     <tr>
       <td class="nowrap"><b>{{ p.codigo }}</b>{% if p.urgente %} <span class="pill urgente plain">urgente</span>{% endif %}<span class="sub">{{ p.creado.strftime('%d/%m %H:%M') }}</span></td>
       <td>{{ tipo_pedido(p.tipo) }}</td>
-      <td class="nowrap">{{ p.semana_entrega }}</td><td>{{ estado(p.estado) }}</td>
+      <td class="nowrap">{{ p.semana_entrega or '—' }}{% if not p.semana_entrega and p.estado == 'pendiente' %}<span class="sub">por planificar</span>{% endif %}</td><td>{{ estado(p.estado) }}</td>
       <td class="n">{{ p.unidades|miles }}<span class="sub">{{ p.kg|miles(1) }} kg</span></td><td class="n">{{ p.cajas }}</td>
       <td class="nowrap">{% if p.viaje %}{{ p.viaje.nombre }}<span class="sub">{{ p.viaje.salida }}{% if p.viaje.camion %} · {{ p.viaje.camion.matricula }}{% endif %}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
       <td class="small" style="max-width:320px">{{ lineas(p) }}{% if p.comentario %}<br><i>{{ p.comentario }}</i>{% endif %}</td>
@@ -139,7 +136,7 @@
 
 <section class="tab-panel card" id="tab-vetos" hidden>
   <div class="card-head"><h2>Almacenes de los que no quieres recibir ropa</h2>
-    <span class="small">Por defecto puedes recibir de cualquier almacén: cada semana el optimizador elige el que mejor te sirve.</span></div>
+    <span class="small">Por defecto puedes recibir de cualquier almacén: en cada planificación el optimizador elige el que mejor te sirve.</span></div>
   <form method="post" action="{{ url_for('tienda.vetos', tid=t.id) }}">{{ csrf() }}
     <div class="actions" style="margin-bottom:10px">
       <button type="button" class="ghost sm" data-check-all="almacenes_vetados" data-valor="0">Quitar todos los vetos</button>
@@ -163,7 +160,7 @@
       sem.hidden = sem.disabled = v !== "semanal";
       mes.hidden = mes.disabled = v !== "mensual";
       ay.textContent = v === "diaria" ? "Se pide cada día de lunes a viernes." :
-                       v === "mensual" ? "Día del mes (1–28)." : "Lo pedido de lunes a viernes llega la semana siguiente.";
+                       v === "mensual" ? "Día del mes (1–28)." : "El pedido se suma a los pendientes y entra en la próxima planificación de rutas.";
     };
     f.addEventListener("change", pintar); pintar();
   })();

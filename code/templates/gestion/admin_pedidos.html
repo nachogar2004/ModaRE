@@ -5,7 +5,9 @@
 {{ cabecera('Pedidos', 'Automáticos y adicionales de todas las tiendas' ~ (' · se muestran los 500 más recientes' if filas|length == 500 else ''), eyebrow='Operación') }}
 
 <form method="get" class="card tools" style="padding:14px 16px">
-  <select name="semana" data-autosubmit aria-label="Semana"><option value="">Todas las semanas</option>{% for s in semanas %}<option {{ 'selected' if s == f.semana }}>{{ s }}</option>{% endfor %}</select>
+  <select name="lote" data-autosubmit aria-label="Lote"><option value="">Todos los lotes</option>
+    <option value="sin" {{ 'selected' if f.lote == 'sin' }}>Pendientes de planificar</option>
+    {% for c in lotes %}<option {{ 'selected' if c == f.lote }}>{{ c }}</option>{% endfor %}</select>
   <select name="estado" data-autosubmit aria-label="Estado"><option value="">Todos los estados</option>{% for k, v in ESTADOS_PEDIDO.items() %}<option value="{{ k }}" {{ 'selected' if k == f.estado }}>{{ v }}</option>{% endfor %}</select>
   <select name="tipo" data-autosubmit aria-label="Tipo"><option value="">Automáticos y adicionales</option>
     <option value="automatico" {{ 'selected' if f.tipo == 'automatico' }}>Solo automáticos</option>
@@ -21,12 +23,12 @@
     <span class="small"><b id="n-ped">{{ filas|length }}</b> pedidos · {{ filas|sum(attribute='cajas')|miles }} cajas</span>
   </div>
   <div class="table-wrap mt"><table id="t-ped">
-    <thead><tr><th>Pedido</th><th>Tienda</th><th>Tipo</th><th>Semana</th><th>Estado</th><th class="n">Prendas</th><th class="n">Cajas</th><th>Almacén · ruta</th><th>Contenido</th></tr></thead>
+    <thead><tr><th>Pedido</th><th>Tienda</th><th>Tipo</th><th>Lote</th><th>Estado</th><th class="n">Prendas</th><th class="n">Cajas</th><th>Almacén · ruta</th><th>Contenido</th></tr></thead>
     <tbody>
     {% for p in filas %}
     <tr><td class="nowrap"><b>{{ p.codigo }}</b>{% if p.urgente %} <span class="pill urgente plain">urgente</span>{% endif %}<span class="sub">{{ p.creado.strftime('%d/%m %H:%M') }}</span></td>
       <td><a href="{{ url_for('tienda.panel', tid=p.tienda_id) }}">{{ p.tienda.nombre }}</a><span class="sub">{{ p.tienda_id }} · {{ p.tienda.provincia }}</span></td>
-      <td>{{ tipo_pedido(p.tipo) }}</td><td class="nowrap"><a href="{{ url_for('admin.planificacion', semana=p.semana_entrega) }}" title="Planificar esta semana">{{ p.semana_entrega }}</a></td><td>{{ estado(p.estado) }}</td>
+      <td>{{ tipo_pedido(p.tipo) }}</td><td class="nowrap">{% if p.semana_entrega %}<a href="{{ url_for('admin.planificacion', lote=p.semana_entrega) }}#lote" title="Ver el lote">{{ p.semana_entrega }}</a>{% else %}<span class="muted">por planificar</span>{% endif %}</td><td>{{ estado(p.estado) }}</td>
       <td class="n">{{ p.unidades|miles }}<span class="sub">{{ p.kg|miles(1) }} kg</span></td><td class="n">{{ p.cajas }}</td>
       <td class="nowrap">{{ p.almacen_id or '—' }}<span class="sub">{{ p.viaje.nombre if p.viaje else 'sin ruta' }}</span></td>
       <td class="small" style="max-width:300px">{{ lineas(p) }}{% if p.comentario %}<br><i>{{ p.comentario }}</i>{% endif %}</td></tr>

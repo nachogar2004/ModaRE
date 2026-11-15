@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 
 from . import config as C
-from .datos import Datos, min_a_hhmm
+from .datos import Datos, letra_dia, min_a_hhmm
 
 
 class Conductor:
@@ -135,8 +135,8 @@ def simular_ruta(d: Datos, planta: str, ruta: dict) -> dict:
             tarde_kg += v.kg
         detalle.append({
             "visita": v.id, "tienda": v.tienda, "kg": v.kg, "cajas": v.cajas, "km_tramo": round(km, 1),
-            "llegada": min_a_hhmm(llegada), "inicio_descarga": min_a_hhmm(inicio_desc),
-            "ventana": f"{''.join(C.DIAS[x] for x in v.dias)} {v.ini // 60:02d}:{v.ini % 60:02d}-{v.fin // 60:02d}:{v.fin % 60:02d}",
+            "llegada": min_a_hhmm(llegada, d.dias_semana), "inicio_descarga": min_a_hhmm(inicio_desc, d.dias_semana),
+            "ventana": f"{''.join(letra_dia(x, d.dias_semana) for x in v.dias)} {v.ini // 60:02d}:{v.ini % 60:02d}-{v.fin // 60:02d}:{v.fin % 60:02d}",
             "a_tiempo": a_tiempo, "t_abs": inicio_desc,
         })
         previo = v.tienda
@@ -160,7 +160,7 @@ def simular_ruta(d: Datos, planta: str, ruta: dict) -> dict:
 
     return {
         "id": veh.id, "planta": planta, "tipo": veh.tipo, "operador": veh.operador, "tarifa": veh.tarifa,
-        "salida": min_a_hhmm(salida_real), "vuelta": min_a_hhmm(vuelta),
+        "salida": min_a_hhmm(salida_real, d.dias_semana), "vuelta": min_a_hhmm(vuelta, d.dias_semana),
         "t_salida": ruta["salida"], "t_vuelta": vuelta,
         "paradas": detalle, "n_paradas": len(detalle),
         "kg": round(sum(p["kg"] for p in detalle), 1), "cajas": sum(p["cajas"] for p in detalle),

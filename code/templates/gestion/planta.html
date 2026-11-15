@@ -29,7 +29,7 @@
   <div class="card-head"><h2>Reposiciones a almacenes</h2>
     <span class="small">Cajas mixtas con la mezcla de prendas que han pedido las tiendas de cada almacén. Al expedir se descuenta tu stock.</span></div>
   <div class="table-wrap mt"><table>
-    <thead><tr><th>Código</th><th>Semana</th><th>Almacén</th><th>Ruta y camión</th><th class="n">Cajas</th><th class="n">kg</th><th>Estado</th><th>Contenido</th><th></th></tr></thead>
+    <thead><tr><th>Código</th><th>Lote</th><th>Almacén</th><th>Ruta y camión</th><th class="n">Cajas</th><th class="n">kg</th><th>Estado</th><th>Contenido</th><th></th></tr></thead>
     <tbody>
     {% for r in reps %}
     <tr><td><b>{{ r.codigo }}</b></td><td class="nowrap">{{ r.semana }}</td><td>{{ r.almacen.nombre }}</td>
@@ -38,7 +38,7 @@
       <td class="small" style="max-width:300px">{{ lineas(r) }}</td>
       <td class="act">{% if r.estado == 'planificada' %}<form class="inline" method="post" action="{{ url_for('planta.expedir', pid=p.id, rid=r.id) }}"
             data-confirm="¿Expedir {{ r.cajas }} cajas a {{ r.almacen.nombre }}? Se descontará el stock de la planta.">{{ csrf() }}<button class="sm">{{ icono('send') }}Expedir</button></form>{% endif %}</td></tr>
-    {% else %}{{ vacio('No hay reposiciones. Aparecerán cuando la central planifique la semana.', 'send', 9) }}{% endfor %}
+    {% else %}{{ vacio('No hay reposiciones. Aparecerán cuando la central calcule las rutas.', 'send', 9) }}{% endfor %}
     </tbody>
   </table></div>
 </section>
@@ -53,7 +53,7 @@
     <div class="card flush">
       <div class="card-head"><h2>Rutas troncales</h2></div>
       <div class="table-wrap mt"><table>
-        <thead><tr><th>Ruta</th><th>Semana</th><th>Salida</th><th class="n">km</th><th>Camión</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Ruta</th><th>Lote</th><th>Salida</th><th class="n">km</th><th>Camión</th><th>Estado</th></tr></thead>
         <tbody>
         {% for v in viajes %}<tr><td><b>{{ v.nombre }}</b><span class="sub">{{ v.recorrido }}</span></td><td class="nowrap">{{ v.semana }}</td><td class="nowrap">{{ v.salida }}</td>
           <td class="n">{{ v.km|miles }}</td><td>{{ v.camion.matricula if v.camion else '—' }}</td><td>{{ estado(v.estado, ESTADOS_VIAJE) }}</td></tr>

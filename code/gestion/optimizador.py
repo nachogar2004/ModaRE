@@ -7,7 +7,7 @@ Es el ÚNICO módulo de la app que lanza la librería. Si se sustituye por otra 
 
 No hay que exportar nada: la librería lee la red, los vetos, los parámetros, los vehículos, las tarifas y las
 distancias directamente de la base de datos (modare.datos.cargar_datos), así que optimiza con lo que haya en la
-app en ese momento. Los pedidos de la semana ya los ha volcado `logistica.cerrar_semana` a la tabla
+app en ese momento. Los pedidos del lote ya los ha volcado `logistica.cerrar_lote` a la tabla
 pedidos_optimizador.
 """
 from __future__ import annotations
@@ -61,7 +61,11 @@ def ejecutar(semana: str, *, asignacion: str = "optimo", plantas_futuras: bool =
     """Optimiza la semana e importa el plan (necesita contexto de app). Lo usan la web y el trabajador.
     segundos y precio_co2 salen de la configuración (modare/config.py) salvo que se indiquen."""
     from modare.planificador import planificar
-    planificar(semana, fuente="pedidos", asignacion=asignacion,
+    from .modelos import Lote
+    lote = db.session.get(Lote, semana)
+    # lote: las rutas empiezan su primer día de reparto (días laborables siguientes); semanas antiguas: de lunes a viernes
+    inicio = lote.inicio if lote is not None and not semana[:4].isdigit() else None
+    planificar(semana, fuente="pedidos", asignacion=asignacion, inicio=inicio,
                segundos=segundos if segundos is not None else C.SEGUNDOS_BUSQUEDA,
                precio_co2=precio_co2 if precio_co2 is not None else C.PRECIO_CO2_EUR_T,
                plantas_futuras=plantas_futuras, log=log)

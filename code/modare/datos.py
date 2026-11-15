@@ -1,6 +1,7 @@
 """Carga de los datos desde la base de datos y construcción de la demanda semanal (visitas)."""
 from __future__ import annotations
 
+import datetime as dt
 import math
 import zlib
 from dataclasses import dataclass, field
@@ -16,18 +17,39 @@ def hhmm_a_min(s: str) -> int:
     return int(h) * 60 + int(m)
 
 
-def min_a_hhmm(m: float) -> str:
-    """Minuto absoluto de la semana -> 'X 10:35' (día + hora)."""
+def letra_dia(indice: int, dias_semana: list[int] | None = None) -> str:
+    """Día del plan -> letra del día de la semana (L, M, X…) según el calendario del plan."""
+    if dias_semana and 0 <= indice < len(dias_semana):
+        return C.DIAS[dias_semana[indice]]
+    return C.DIAS[indice % 7]
+
+
+def min_a_hhmm(m: float, dias_semana: list[int] | None = None) -> str:
+    """Minuto absoluto del plan -> 'X 10:35' (día + hora). Con calendario, el día 0 puede ser cualquier día."""
     m = int(round(m))
     dia, resto = divmod(m, 1440)
-    return f"{C.DIAS[dia % 7]} {resto // 60:02d}:{resto % 60:02d}"
+    return f"{letra_dia(dia, dias_semana)} {resto // 60:02d}:{resto % 60:02d}"
 
 
-def dias_desde_rango(rango: str, horizonte: int) -> list[int]:
-    """'L-V' -> [0,1,2,3,4]; 'M-V' -> [1,2,3,4]."""
+def dias_laborables(inicio: dt.date, n: int) -> list[dt.date]:
+    """Los n primeros días laborables (lunes a viernes) desde inicio, incluido."""
+    out, f = [], inicio
+    while len(out) < n:
+        if f.weekday() < 5:
+            out.append(f)
+        f += dt.timedelta(days=1)
+    return out
+
+
+def dias_desde_rango(rango: str, horizonte: int, dias_semana: list[int] | None = None) -> list[int]:
+    """Días del plan (0..horizonte-1) en los que se puede recibir según el rango 'L-V', 'M-V'…
+    Sin calendario el día 0 es lunes: 'L-V' -> [0,1,2,3,4]; 'M-V' -> [1,2,3,4].
+    Con calendario (dias_semana[i] = día de la semana del día i del plan) se respeta el día real."""
     a, b = rango.split("-")
     ini, fin = C.DIAS.index(a), C.DIAS.index(b)
-    return [d for d in range(ini, fin + 1) if d < horizonte]
+    if not dias_semana:
+        return [d for d in range(ini, fin + 1) if d < horizonte]
+    return [i for i in range(min(horizonte, len(dias_semana))) if ini <= dias_semana[i] <= fin]
 
 
 def haversine_km(lat1, lon1, lat2, lon2) -> float:
@@ -99,6 +121,8 @@ class Datos:
     # vetos (los decide la app): por defecto todo almacén recibe de cualquier planta y toda tienda de cualquier almacén
     plantas_vetadas: dict = field(default_factory=dict, repr=False)     # almacén -> {plantas que no quiere}
     almacenes_vetados: dict = field(default_factory=dict, repr=False)   # tienda  -> {almacenes que no quiere}
+    # calendario del plan: dias_semana[i] = día de la semana (0 = lunes) del día i del plan. Vacío = semana L-V
+    dias_semana: list = field(default_factory=list, repr=False)
 
     def dist(self, a: str, b: str) -> tuple[float, float]:
         """km y minutos de conducción de camión. Respaldo: línea recta × factor_rodeo."""
@@ -204,8 +228,8 @@ def cargar_datos(distancias: bool = True) -> Datos:
     coords.update({r.id_almacen: (r.lat, r.lon) for r in almacenes.itertuples()})
     coords.update({r.id_tienda: (r.lat, r.lon) for r in tiendas.itertuples()})
     return Datos(P, plantas, almacenes, tiendas, tipos, tarifas, km, mins, coords,
-                 _cargar_vetos("SELECT almacen_id, planta_id FROM almacen_plantas_vetadas"),
-                 _cargar_vetos("SELECT tienda_id, almacen_id FROM tienda_almacenes_vetados"))
+                 plantas_vetadas=_cargar_vetos("SELECT almacen_id, planta_id FROM almacen_plantas_vetadas"),
+                 almacenes_vetados=_cargar_vetos("SELECT tienda_id, almacen_id FROM tienda_almacenes_vetados"))
 
 
 def _cargar_vetos(consulta: str) -> dict[str, set[str]]:
@@ -282,7 +306,7 @@ def construir_visitas(d: Datos, pedidos_kg: dict[str, float]) -> tuple[list[Visi
         cajas = math.ceil(kg / C.KG_POR_CAJA)
         cat = t.categoria_tamano
         max_cajas_entrega = int(P[f"max_palets_entrega_{cat}"] * cajas_por_palet)
-        dias_ok = dias_desde_rango(t.dias_recepcion, horizonte)
+        dias_ok = dias_desde_rango(t.dias_recepcion, horizonte, d.dias_semana)
         freq = max(1, round(P[f"entregas_semana_{cat}"]))
         n = max(freq, math.ceil(cajas / max_cajas_entrega))
         if n > len(dias_ok):
@@ -325,7 +349,7 @@ def construir_visitas_troncal(d: Datos, visitas_tienda: list[Visita],
     for a, por_planta in flujos.items():
         r = alm.loc[a]
         kg_a = sum(por_planta.values())
-        dias_ok = dias_desde_rango(r.dias_recepcion, horizonte)
+        dias_ok = dias_desde_rango(r.dias_recepcion, horizonte, d.dias_semana)
         varias = len(por_planta) > 1
         for p, kg in por_planta.items():
             cajas = max(1, round(cajas_alm[a] * kg / kg_a))

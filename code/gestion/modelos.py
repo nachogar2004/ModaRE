@@ -311,7 +311,8 @@ class Pedido(db.Model):
     estado = db.Column(db.String(12), default="pendiente", nullable=False, index=True)
     creado = db.Column(db.DateTime, default=ahora)
     fecha_generacion = db.Column(db.Date)                     # día al que corresponde (automáticos)
-    semana_entrega = db.Column(db.String(8), nullable=False, index=True)  # 2026-W47
+    # lote en el que se planificó (L-0001; en datos antiguos, la semana 2026-W47). None = pendiente de planificar
+    semana_entrega = db.Column(db.String(8), nullable=True, index=True)
     urgente = db.Column(db.Boolean, default=False)
     comentario = db.Column(db.Text)
     almacen_id = db.Column(db.String(24), db.ForeignKey("almacenes.id"))  # almacén que lo sirve (del plan)
@@ -340,6 +341,22 @@ class Pedido(db.Model):
     @property
     def codigo(self):
         return f"P-{self.id:05d}"
+
+
+class Lote(db.Model):
+    """Pedidos que se cierran a la vez para calcular sus rutas. El admin cierra un lote cuando quiere: todos los
+    pedidos pendientes en ese momento entran en él y se optimizan; los que lleguen después esperan al siguiente.
+    El código del lote es la clave que usan rutas, reposiciones, planes y optimizaciones (antes, la semana)."""
+    __tablename__ = "lotes"
+    codigo = db.Column(db.String(8), primary_key=True)          # L-0001 (los datos anteriores: 2026-W48)
+    creado = db.Column(db.DateTime, default=ahora, nullable=False)
+    inicio = db.Column(db.Date, nullable=False)                 # primer día de reparto de sus rutas
+    creado_por_id = db.Column(db.Integer, db.ForeignKey("usuarios.id"))
+    creado_por = db.relationship("Usuario")
+
+    @property
+    def pedidos(self):
+        return Pedido.query.filter_by(semana_entrega=self.codigo).all()
 
 
 class LineaPedido(db.Model):

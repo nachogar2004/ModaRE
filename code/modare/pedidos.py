@@ -20,7 +20,10 @@ def semana_actual() -> str:
 
 
 def num_semana(semana: str) -> int:
-    return int(semana.split("-W")[1])
+    """Número de semana ISO de '2026-W47'. Para un lote (L-0001…) se usa la semana actual."""
+    if "-W" in semana:
+        return int(semana.split("-W")[1])
+    return dt.date.today().isocalendar()[1]
 
 
 def guardar(semana: str, id_tienda: str, cajas: int, kg: float | None = None, comentario: str = ""):

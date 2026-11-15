@@ -135,6 +135,13 @@ def estado_trabajo(semana: str) -> dict:
     return {"estado": r["estado"], "msg": r["mensaje"]}
 
 
+def borrar_lote(semana: str):
+    """Al deshacer un lote: se olvidan su plan y el estado de su optimización."""
+    with engine().begin() as con:
+        con.execute(sa.delete(planes).where(planes.c.semana == semana))
+        con.execute(sa.delete(trabajos).where(trabajos.c.semana == semana))
+
+
 def _ocupado(semana: str) -> bool:
     return estado_trabajo(semana).get("estado") in ("calculando", "pendiente")
 

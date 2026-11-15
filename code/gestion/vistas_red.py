@@ -76,19 +76,6 @@ def proxima_fecha_auto(t: Tienda, desde: dt.date) -> dt.date | None:
     return None
 
 
-def semanas_abiertas(n=6) -> list[str]:
-    primera = L.lunes_de(L.semana_entrega_para(dt.date.today()))
-    out = []
-    for i in range(n + 4):
-        s = (primera + dt.timedelta(weeks=i)).isocalendar()
-        sem = f"{s[0]}-W{s[1]:02d}"
-        if not L.semana_cerrada(sem):
-            out.append(sem)
-        if len(out) == n:
-            break
-    return out
-
-
 # ============================================================================= TIENDA
 @bp_tienda.route("/", endpoint="mia")
 @login_required
@@ -119,7 +106,7 @@ def tienda_panel(tid):
         "gestion/tienda.html", t=t, cats=cats, m=matriz(cats), stock=stock, media=media, cobertura=cobertura,
         ventas_7d={k: round(v * 7) for k, v in semana_pasada.items()},
         en_camino=L.en_camino(t.id), propuesta=L.propuesta_automatica(t, hoy), pedidos=pedidos,
-        proxima_auto=proxima_fecha_auto(t, hoy), semanas=semanas_abiertas(),
+        proxima_auto=proxima_fecha_auto(t, hoy),
         alertas=L.alertas("tienda", t.id), hoy=hoy,
         almacenes=Almacen.query.filter_by(activo=True).order_by(Almacen.provincia).all(),
         por_recibir=[p for p in pedidos if p.estado == "en_reparto"],
@@ -168,10 +155,10 @@ def tienda_pedido(tid):
     comprobar_acceso("tienda", tid)
     t = db.get_or_404(Tienda, tid)
     lineas = leer_lineas("p")
-    semana = request.form.get("semana", "")
-    return _accion(lambda: [] if L.crear_pedido_adicional(t, lineas, semana, request.form.get("comentario", ""),
+    return _accion(lambda: [] if L.crear_pedido_adicional(t, lineas, request.form.get("comentario", ""),
                                                           bool(request.form.get("urgente")), current_user) else [],
-                   f"Pedido adicional registrado para la semana {semana}.", url_for("tienda.panel", tid=tid))
+                   "Pedido adicional registrado: entrará en la próxima planificación de rutas.",
+                   url_for("tienda.panel", tid=tid))
 
 
 @bp_tienda.post("/<tid>/config", endpoint="config")
@@ -277,11 +264,13 @@ def almacen_panel(aid):
     comprobar_acceso("almacen", aid)
     a = db.get_or_404(Almacen, aid)
     entrantes = Reposicion.query.filter_by(almacen_id=aid).order_by(Reposicion.semana.desc()).limit(30).all()
-    # el almacén que sirve cada pedido lo decide el optimizador cada semana
+    # el almacén que sirve cada pedido lo decide el optimizador en cada lote
     salientes = (Pedido.query.filter(Pedido.almacen_id == aid,
                                      Pedido.estado.in_(("confirmado", "planificado", "en_reparto", "entregado")))
                  .order_by(Pedido.semana_entrega.desc(), Pedido.tienda_id).limit(150).all())
-    ultima = db.session.query(db.func.max(Pedido.semana_entrega)).filter(Pedido.almacen_id == aid).scalar()
+    # último lote en el que este almacén sirvió a alguna tienda
+    ultima = (db.session.query(Pedido.semana_entrega).filter(Pedido.almacen_id == aid, Pedido.semana_entrega.isnot(None))
+              .order_by(Pedido.creado.desc()).limit(1).scalar())
     servidas = (Tienda.query.join(Pedido, Pedido.tienda_id == Tienda.id)
                 .filter(Pedido.almacen_id == aid, Pedido.semana_entrega == ultima).distinct().order_by(Tienda.nombre).all()
                 if ultima else [])
