@@ -33,7 +33,7 @@
     {% if plan %}{% set r = plan.resumen %}
       <p>{{ r.rutas }} rutas · {{ r.camiones }} camiones · {{ '{:,.0f}'.format(r.km) }} km ·
          <b>{{ '{:,.0f}'.format(r.coste_eur) }} €</b> · {{ '{:,.0f}'.format(r.co2_kg) }} kg CO₂ ·
-         servicio {{ '%.1f'|format(100 * r.nivel_servicio) }} %</p>
+         servicio {{ '%.1f'|format(100 * r.nivel_servicio) ~ ' %' if r.nivel_servicio is not none else '–' }}</p>
       <p><a class="btn" href="{{ url_for('plan', semana=semana) }}">Ver rutas y mapa</a></p>
     {% else %}<p class="muted">Todavía no hay plan para esta semana.</p>{% endif %}
     <form method="get"><label>Cambiar de semana</label><input name="semana" value="{{ semana }}" pattern="\d{4}-W\d{2}"></form>
