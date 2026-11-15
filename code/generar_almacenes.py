@@ -15,7 +15,9 @@
     barato en provincias de interior poco pobladas.
 
 Uso (desde code/):  .venv\\Scripts\\python generar_almacenes.py
-Después se puede editar el CSV a mano (mover un almacén, cambiar su capacidad u horario).
+Es una herramienta de la SEMILLA: lee data/tiendas.csv y data/parametros.csv y escribe data/almacenes.csv, que solo se
+usa al crear la base de datos (python -m gestion.semilla --reset). Con la base ya creada, los almacenes se editan en
+la app (Admin → Almacenes) y las distancias de los que se muevan se recalculan desde Admin → Planificación.
 """
 import csv
 import math
@@ -23,7 +25,7 @@ import re
 import unicodedata
 
 from modare import config as C
-from modare.datos import cargar_datos, kg_semana_estimado
+from modare.datos import kg_semana_estimado, leer_csv, parametros_csv
 from modare.poligonos import geocodificar
 
 
@@ -67,9 +69,10 @@ def costes_almacen(aid: str, cap: float, P: dict) -> dict:
 
 
 def main():
-    d = cargar_datos()
-    P = d.P
-    t = d.tiendas[d.tiendas.acceso_carretera == 1].copy()
+    # herramienta de la SEMILLA: lee los CSV (no la base de datos)
+    P = parametros_csv()
+    t = leer_csv("tiendas.csv")
+    t = t[(t.activa == 1) & (t.acceso_carretera == 1)].copy()
     t["kg"] = [kg_semana_estimado(r, P) for _, r in t.iterrows()]
     grupos = list(t.groupby("provincia"))
     centroides = {f"AL-{slug(prov)}": (g.lat.mean(), g.lon.mean()) for prov, g in grupos}

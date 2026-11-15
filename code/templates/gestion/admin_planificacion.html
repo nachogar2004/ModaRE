@@ -59,16 +59,26 @@
   {% elif trabajo and trabajo.estado == 'ok' %}
     <div class="alerta info">{{ icono('check-circle') }}<div>{{ trabajo.msg }}</div></div>
   {% endif %}
+  {% if dist.estado == 'calculando' %}
+    <div class="alerta info">{{ icono('refresh') }}<div><b>Calculando distancias por carretera</b> ({{ dist.msg }})… Recarga en unos segundos.</div></div>
+  {% elif dist.faltan %}
+    <div class="alerta">{{ icono('map') }}<div>
+      <b>{{ dist.faltan|length }} {{ 'punto' if dist.faltan|length == 1 else 'puntos' }} de la red sin distancias por carretera</b>
+      ({{ dist.faltan[:6]|join(', ') }}{{ '…' if dist.faltan|length > 6 }}): son nuevos o se han movido. El optimizador usará
+      línea recta × 1,26 para ellos hasta que se calculen.
+      {% if dist.estado == 'error' %}<br><span class="err">Último intento: {{ dist.msg }}</span>{% endif %}
+      <form method="post" action="{{ url_for('admin.distancias') }}" class="mt">{{ csrf() }}
+        <button class="sec sm">{{ icono('map') }}Calcular distancias (OSRM)</button></form>
+    </div></div>
+  {% elif dist.estado in ('ok', 'error') %}
+    <p class="small">{{ icono('map') }} Distancias por carretera{{ ': ' ~ dist.msg if dist.estado == 'ok' else ' completas' }}.</p>
+  {% endif %}
   <form method="post" action="{{ url_for('admin.optimizar') }}">{{ csrf() }}<input type="hidden" name="semana" value="{{ semana }}">
     <details {% if not plan %}open{% endif %}>
       <summary class="small" style="cursor:pointer">Opciones avanzadas</summary>
       <div class="formgrid">
-        <div><label for="seg">Segundos de búsqueda por planta</label><input id="seg" type="number" name="segundos" value="30" min="5" max="600">
-          <div class="ayuda">Más tiempo, rutas algo mejores.</div></div>
         <div><label for="asig">Asignación tienda → almacén → planta</label><select id="asig" name="asignacion">
           <option value="optimo">Óptima (respeta capacidades y vetos)</option><option value="actual">Actual (almacén de su provincia)</option></select></div>
-        <div><label for="co2">Precio del CO₂ (€/t)</label><input id="co2" type="number" name="precio_co2" value="0" min="0" step="1">
-          <div class="ayuda">Mayor de 0 = prioriza rutas con menos emisiones.</div></div>
         <div><label>&nbsp;</label><label class="check"><input type="checkbox" name="plantas_futuras"> Incluir plantas futuras</label></div>
       </div>
     </details>

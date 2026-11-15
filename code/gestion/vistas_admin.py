@@ -4,6 +4,8 @@ from __future__ import annotations
 import datetime as dt
 import re
 import secrets
+import threading
+import traceback
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -14,14 +16,16 @@ from sqlalchemy.exc import DataError, IntegrityError
 
 from modare import config as C
 from modare import bd as BD
+from modare import distancias as DIST
+from modare.datos import valor_parametro
 from modare.planificador import cargar_plan
 
 from . import logistica as L
 from . import optimizador as OPT
 from . import rol_requerido
-from .modelos import (DIAS_SEMANA, ESTADOS_CAMION, ESTADOS_PEDIDO, FRECUENCIAS, ROLES, Almacen, CamionReparto,
-                      CamionTroncal, Categoria, MovimientoStock, Pedido, Planta, Reposicion, StockPlanta, StockTienda,
-                      Tienda, Usuario, Venta, Viaje, db)
+from .modelos import (DIAS_SEMANA, ESTADOS_CAMION, ESTADOS_PEDIDO, FRECUENCIAS, ROLES, Ajuste, Almacen, CamionReparto,
+                      CamionTroncal, Categoria, MovimientoStock, Parametro, Pedido, Planta, Reposicion, StockPlanta,
+                      StockTienda, Tarifa, Tienda, TipoVehiculo, Usuario, Venta, Viaje, db)
 from .semilla import _slug, capacidad_vehiculos
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -60,6 +64,8 @@ class Entidad:
     id_auto: Callable | None = None
     enlace: Callable | None = None           # url al panel de la entidad
     filtros: list[str] = field(default_factory=list)
+    solo_edicion: bool = False               # sin altas ni bajas (datos que el optimizador necesita completos)
+    validar: Callable | None = None          # comprobaciones extra antes de guardar (lanza ValueError)
 
 
 def _op_plantas():
@@ -75,8 +81,10 @@ def _op_tiendas():
 
 
 def _op_tipos(tipos):
-    cap = capacidad_vehiculos()
-    return lambda: [(t, f"{t} · {cap[t]['descripcion']}") for t in tipos]
+    def opciones():       # al pintar el formulario (los tipos de vehículo están en la base y se pueden editar)
+        cap = capacidad_vehiculos()
+        return [(t, f"{t} · {cap[t]['descripcion']}") for t in tipos if t in cap]
+    return opciones
 
 
 def _op(d: dict):
@@ -142,6 +150,29 @@ def _alta_usuario(u, form):
         raise ValueError("La contraseña es obligatoria al crear un usuario.")
 
 
+def _op_etiquetas():
+    return [(x, x) for x in ("REAL", "ESTIMADO", "SINTÉTICO")]
+
+
+def _validar_parametro(p: Parametro):
+    """Un parámetro numérico tiene que seguir siéndolo (el optimizador hace cuentas con él)."""
+    p.valor = p.valor.strip()
+    with db.session.no_autoflush:
+        antes = db.session.query(Parametro.valor).filter_by(id=p.id).scalar()
+    if isinstance(valor_parametro(antes), float):
+        v = valor_parametro(p.valor.replace(",", "."))
+        if not isinstance(v, float):
+            raise ValueError(f"«{p.id}» tiene que ser un número (antes valía {antes}).")
+        p.valor = p.valor.replace(",", ".")
+
+
+def _validar_positivos(obj):
+    for c in obj.__table__.columns:
+        v = getattr(obj, c.name)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v < 0:
+            raise ValueError(f"«{c.name}» no puede ser negativo.")
+
+
 ENTIDADES: dict[str, Entidad] = {
     "tiendas": Entidad(
         Tienda, "Tiendas", "tienda",
@@ -165,6 +196,9 @@ ENTIDADES: dict[str, Entidad] = {
          Campo("dias_seguridad", "Días de stock de seguridad", "int"),
          Campo("pedido_auto_activo", "Pedidos automáticos activos", "bool"),
          Campo("capacidad_max_prendas", "Capacidad máx. (prendas)", "int"),
+         Campo("en_muestra", "En la muestra de pruebas", "bool", ayuda="optimizar.py --muestra usa solo estas tiendas"),
+         Campo("planta_actual", "Planta que la sirve hoy", "select", _op_plantas,
+               ayuda="Solo para el escenario «asignación actual» (comparar con lo que se hace hoy)"),
          Campo("responsable", "Responsable"), Campo("telefono", "Teléfono"), Campo("email", "Email"),
          Campo("activa", "Activa", "bool"), Campo("fecha_alta", "Fecha de alta", "date")],
         [("id", "Código"), ("nombre", "Nombre"), ("provincia", "Provincia"), ("categoria_tamano", "Tamaño"),
@@ -197,6 +231,11 @@ ENTIDADES: dict[str, Entidad] = {
          Campo("capacidad_kg_semana", "Capacidad de reparto (kg/semana)", "float", requerido=True),
          Campo("hora_inicio", "Abre", "time"), Campo("hora_fin", "Cierra", "time"),
          Campo("dias_recepcion", "Días de recepción", ayuda="L-V"),
+         Campo("tiempo_descarga_min", "Tiempo de descarga del camión troncal (min)", "int"),
+         Campo("coste_fijo_eur_semana", "Coste fijo (€/semana)", "float",
+               ayuda="Alquiler + gastos + gestión. El optimizador lo paga si el almacén está abierto. Vacío = mediana del resto"),
+         Campo("coste_manipulacion_eur_kg", "Coste de manipulación (€/kg)", "float",
+               ayuda="€/h de operario ÷ kg/h. Vacío = mediana del resto"),
          Campo("plantas_vetadas", "Plantas de las que NO quiere recibir ropa", "multi", _op_plantas, modelo=Planta,
                ayuda="Por defecto ninguna: el optimizador elige cada semana la planta que mejor lo repone"),
          Campo("responsable", "Responsable"), Campo("telefono", "Teléfono"), Campo("activo", "Activo", "bool")],
@@ -233,6 +272,41 @@ ENTIDADES: dict[str, Entidad] = {
         [("username", "Usuario"), ("nombre", "Nombre"), ("rol", "Rol"), ("entidad_id", "Entidad"),
          ("ultimo_acceso", "Último acceso"), ("activo", "Activo")],
         orden=Usuario.username, activo="activo", al_crear=_alta_usuario, filtros=["username", "nombre", "rol"]),
+    "parametros": Entidad(
+        Parametro, "Parámetros del optimizador", "parámetro",
+        [Campo("id", "Clave", solo_alta=True), Campo("valor", "Valor", requerido=True,
+                                                     ayuda="Número (con punto o coma decimal) o texto, según el parámetro"),
+         Campo("unidad", "Unidad"), Campo("descripcion", "Descripción", "textarea"),
+         Campo("etiqueta", "Etiqueta", "select", _op_etiquetas), Campo("fuente", "Fuente", "textarea")],
+        [("id", "Clave"), ("valor", "Valor"), ("unidad", "Unidad"), ("etiqueta", "Etiqueta"), ("descripcion", "Descripción")],
+        orden=Parametro.id, filtros=["id", "descripcion"], solo_edicion=True, validar=_validar_parametro),
+    "vehiculos": Entidad(
+        TipoVehiculo, "Tipos de vehículo", "tipo de vehículo",
+        [Campo("id", "Código", solo_alta=True), Campo("descripcion", "Descripción", requerido=True),
+         Campo("mma_t", "MMA (t)", "float"), Campo("carga_util_kg", "Carga útil (kg)", "float", requerido=True),
+         Campo("volumen_m3", "Volumen (m³)", "float", requerido=True),
+         Campo("capacidad_palets", "Capacidad (palés)", "int", requerido=True),
+         Campo("combustible", "Combustible"),
+         Campo("kgco2e_km_vacio", "Emisiones en vacío (kg CO₂e/km)", "float", requerido=True,
+               ayuda="De aquí sale el consumo: L/km = kg CO₂e/km ÷ 2,51"),
+         Campo("kgco2e_km_lleno", "Emisiones con carga completa (kg CO₂e/km)", "float", requerido=True),
+         Campo("etiqueta", "Etiqueta", "select", _op_etiquetas), Campo("fuente", "Fuente (capacidad)", "textarea"),
+         Campo("fuente_emisiones", "Fuente (emisiones)", "textarea")],
+        [("id", "Código"), ("descripcion", "Descripción"), ("carga_util_kg", "Carga útil kg"), ("volumen_m3", "m³"),
+         ("capacidad_palets", "Palés"), ("kgco2e_km_vacio", "kg CO₂e/km vacío"), ("kgco2e_km_lleno", "lleno")],
+        orden=TipoVehiculo.carga_util_kg, solo_edicion=True, validar=_validar_positivos),
+    "tarifas": Entidad(
+        Tarifa, "Tarifas de transporte", "tarifa",
+        [Campo("id", "Código", solo_alta=True),
+         Campo("coste_fijo_dia_eur", "Coste fijo (€/día)", "float", ayuda="Operador B"),
+         Campo("coste_km_eur", "Coste por km (€/km)", "float"),
+         Campo("coste_hora_eur", "Coste por hora (€/h)", "float", ayuda="Operador A"),
+         Campo("unidades_disponibles", "Unidades disponibles", "int",
+               ayuda="Vacío = ilimitado. Si no, camiones por depósito y día"),
+         Campo("etiqueta", "Etiqueta", "select", _op_etiquetas), Campo("fuente", "Fuente", "textarea")],
+        [("id", "Código"), ("operador", "Operador"), ("tipo_vehiculo", "Tipo"), ("coste_fijo_dia_eur", "€/día"),
+         ("coste_km_eur", "€/km"), ("coste_hora_eur", "€/h"), ("unidades_disponibles", "Unidades")],
+        orden=Tarifa.id, solo_edicion=True, validar=_validar_positivos),
     "categorias": Entidad(
         Categoria, "Categorías de prenda", "categoría",
         [Campo("id", "Código", requerido=True, solo_alta=True), Campo("segmento", "Segmento", requerido=True),
@@ -262,6 +336,7 @@ SECCIONES = {
                 ("Recepción de mercancía", ["dias_recepcion", "ventana_inicio", "ventana_fin", "tiempo_descarga_min",
                                             "vehiculo_max"]),
                 ("Pedido automático", ["pedido_auto_activo", "frecuencia_pedido", "dia_pedido", "dias_seguridad"]),
+                ("Optimizador", ["en_muestra", "planta_actual"]),
                 ("Contacto y estado", ["responsable", "telefono", "email", "fecha_alta", "activa"]),
                 ("Almacenes vetados", ["almacenes_vetados"])],
     "plantas": [("Identificación", ["id", "nombre", "activa", "apertura_prevista"]),
@@ -271,7 +346,8 @@ SECCIONES = {
     "almacenes": [("Identificación", ["id", "nombre", "provincia", "activo"]),
                   ("Ubicación", ["poligono", "municipio", "lat", "lon"]),
                   ("Stock y capacidad", ["stock_cajas", "stock_max_cajas", "capacidad_kg_semana"]),
-                  ("Horario", ["hora_inicio", "hora_fin", "dias_recepcion"]),
+                  ("Horario", ["hora_inicio", "hora_fin", "dias_recepcion", "tiempo_descarga_min"]),
+                  ("Costes (optimizador)", ["coste_fijo_eur_semana", "coste_manipulacion_eur_kg"]),
                   ("Plantas vetadas", ["plantas_vetadas"]),
                   ("Contacto", ["responsable", "telefono"])],
     "camiones-troncal": [("Vehículo", ["planta_id", "tipo_vehiculo", "matricula", "operador", "estado"]),
@@ -280,6 +356,11 @@ SECCIONES = {
     "camiones-reparto": [("Vehículo", ["almacen_id", "tipo_vehiculo", "matricula", "operador", "estado"]),
                          ("Capacidad", ["carga_util_kg", "capacidad_cajas", "capacidad_palets"]),
                          ("Conductor y mantenimiento", ["conductor", "telefono_conductor", "itv_vence", "km_acumulados", "notas"])],
+    "vehiculos": [("Capacidad", ["descripcion", "mma_t", "carga_util_kg", "volumen_m3", "capacidad_palets"]),
+                  ("Emisiones y consumo", ["combustible", "kgco2e_km_vacio", "kgco2e_km_lleno"]),
+                  ("Origen del dato", ["etiqueta", "fuente", "fuente_emisiones"])],
+    "tarifas": [("Costes", ["coste_fijo_dia_eur", "coste_km_eur", "coste_hora_eur", "unidades_disponibles"]),
+                ("Origen del dato", ["etiqueta", "fuente"])],
     "usuarios": [("Cuenta", ["username", "nombre", "email", "password", "activo"]),
                  ("Permisos", ["rol", "tienda_id", "planta_id", "almacen_id"])],
 }
@@ -366,10 +447,15 @@ def lista(ent):
 def editar(ent, oid=None):
     e = _ent(ent)
     alta = oid is None
+    if alta and e.solo_edicion:
+        abort(404)
     obj = e.modelo() if alta else _obtener(e, oid)
     if request.method == "POST":
+        punto_antes = _punto(ent, obj) if not alta else None
         try:
             _aplicar(e, obj, request.form, alta)
+            if e.validar:
+                e.validar(obj)
             if alta:
                 if e.id_auto and not obj.id:
                     obj.id = e.id_auto(obj)
@@ -385,6 +471,7 @@ def editar(ent, oid=None):
                 _rellenar_camion(obj, request.form)
             db.session.commit()
             flash(f"Guardado: {e.singular} {obj.id}.")
+            _avisar_distancias(ent, obj, alta, punto_antes)
             return redirect(url_for("admin.lista", ent=ent))
         except (ValueError, IntegrityError, DataError) as ex:
             db.session.rollback()
@@ -396,6 +483,27 @@ def editar(ent, oid=None):
                 obj = _obtener(e, oid)
     return render_template("gestion/admin_form.html", e=e, ent=ent, obj=obj, alta=alta, form=request.form,
                            secciones=secciones(ent, e), oid=oid)
+
+
+def _punto(ent: str, obj):
+    """Lo que afecta a las distancias de un punto de la red: dónde está y si cuenta para el optimizador."""
+    if ent not in ("tiendas", "plantas", "almacenes"):
+        return None
+    return (obj.lat, obj.lon, getattr(obj, "activa", getattr(obj, "activo", None)), getattr(obj, "acceso_carretera", True))
+
+
+def _avisar_distancias(ent: str, obj, alta: bool, antes):
+    """Si un punto se mueve, sus distancias por carretera ya no valen: se borran (el optimizador usará línea recta
+    hasta recalcularlas). Si es nuevo o vuelve a estar activo, aún no tiene. En ambos casos se avisa."""
+    despues = _punto(ent, obj)
+    if despues is None:
+        return
+    movido = not alta and antes[:2] != despues[:2]
+    if movido:
+        DIST.olvidar([obj.id])
+    if alta or movido or antes[2:] != despues[2:]:
+        flash("Cambia la red: calcula las distancias por carretera de los puntos nuevos o movidos en "
+              "Planificación → «Calcular distancias». Mientras tanto el optimizador usa línea recta × 1,26.")
 
 
 def _validar_usuario(u: Usuario):
@@ -420,6 +528,8 @@ def _validar_usuario(u: Usuario):
 def borrar(ent, oid):
     """Borrado definitivo si no tiene historial; si lo tiene, se da de baja (se conserva el histórico)."""
     e = _ent(ent)
+    if e.solo_edicion:
+        abort(404)
     obj = _obtener(e, oid)
     if ent == "usuarios" and obj.id == current_user.id:
         flash("No puedes borrar tu propio usuario.", "error")
@@ -558,7 +668,8 @@ def planificacion():
         sem_actual=L.semana_entrega_para(dt.date.today()),
         kg=round(sum(p.kg for p in peds), 1), cajas=sum(p.cajas for p in peds),
         tiendas=len({p.tienda_id for p in peds}), cerrada=L.semana_cerrada(semana), viajes=viajes, reps=reps,
-        plan=cargar_plan(semana), trabajo=BD.estado_trabajo(semana), flota_t=flota_t, flota_r=flota_r)
+        plan=cargar_plan(semana), trabajo=BD.estado_trabajo(semana), flota_t=flota_t, flota_r=flota_r,
+        dist=_estado_distancias())
 
 
 @bp.post("/planificacion/cerrar")
@@ -586,9 +697,8 @@ def optimizar():
     semana = _sem(request.form.get("semana"))
     if not L.semana_cerrada(semana):
         flash("Cierra primero la semana para fijar los pedidos.", "error")
-    elif not OPT.lanzar(current_app._get_current_object(), semana, segundos=int(request.form.get("segundos", 30)),
+    elif not OPT.lanzar(current_app._get_current_object(), semana,
                         asignacion=request.form.get("asignacion", "optimo"),
-                        precio_co2=float(request.form.get("precio_co2") or 0),
                         plantas_futuras=bool(request.form.get("plantas_futuras"))):
         flash("Ya hay una optimización en marcha para esta semana.", "error")
     return redirect(url_for("admin.planificacion", semana=semana))
@@ -619,9 +729,49 @@ def camion_viaje(vid):
     return redirect(url_for("admin.planificacion", semana=v.semana) + "#viajes")
 
 
-@bp.post("/exportar")
-def exportar():
-    OPT.exportar_maestros()
-    flash("Tiendas, plantas y almacenes exportados a data/*.csv para la librería de rutas. "
-          "Si has añadido o movido puntos, regenera las distancias con  python calcular_distancias.py")
-    return redirect(request.referrer or url_for("admin.panel"))
+# ----------------------------------------------------------------------------- distancias por carretera
+_calculando_dist = threading.Lock()
+
+
+def _estado_distancias() -> dict:
+    estado, _, msg = (Ajuste.get("distancias_estado") or "").partition("|")
+    if estado == "calculando" and not _calculando_dist.locked():
+        estado, msg = "error", "El cálculo se interrumpió (¿se reinició el servidor?). Vuelve a lanzarlo."
+    try:
+        faltan = DIST.sin_distancias()
+    except Exception as ex:  # noqa: BLE001 — la página de planificación no debe caer por esto
+        faltan, msg = [], f"{msg} (no se pudo comprobar: {ex})"
+    return {"faltan": faltan, "estado": estado, "msg": msg}
+
+
+def _poner_estado_distancias(app, estado: str, msg: str):
+    with app.app_context():
+        Ajuste.set("distancias_estado", f"{estado}|{msg}"[:200])
+        db.session.commit()
+
+
+@bp.post("/distancias")
+def distancias():
+    """Calcula con OSRM (servidor público, 1 consulta/s) las distancias que faltan, en segundo plano."""
+    app = current_app._get_current_object()
+    todos = bool(request.form.get("todos"))
+    if not _calculando_dist.acquire(blocking=False):
+        flash("Ya se están calculando las distancias.", "error")
+        return redirect(request.referrer or url_for("admin.planificacion"))
+    _poner_estado_distancias(app, "calculando", "todos los pares" if todos else "puntos nuevos o movidos")
+
+    def _run():
+        try:
+            r = DIST.calcular(todos=todos, log=lambda *a: None)
+            estado, msg = "ok", (f"{dt.datetime.now():%d/%m %H:%M} · {r['pares']} pares de {r['puntos']} puntos: "
+                                 f"{r['osrm']} por carretera, {r['linea_recta']} en línea recta (OSRM sin ruta)")
+        except Exception as ex:  # noqa: BLE001 — se enseña en la web
+            traceback.print_exc()
+            estado, msg = "error", str(ex)
+        finally:
+            _calculando_dist.release()
+        _poner_estado_distancias(app, estado, msg)
+
+    threading.Thread(target=_run, daemon=True).start()
+    flash("Calculando distancias por carretera en segundo plano (unos segundos por punto). Recarga para ver el resultado.")
+    return redirect(request.referrer or url_for("admin.planificacion"))

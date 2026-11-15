@@ -1,13 +1,14 @@
 """Puente entre la app de gestión y la librería de rutas (paquete `modare`).
 
-Es el ÚNICO módulo de la app que conoce la librería. Si se sustituye por otra versión, basta con
-adaptar estas tres funciones:
+Es el ÚNICO módulo de la app que lanza la librería. Si se sustituye por otra versión, basta con adaptar:
 
-  exportar_maestros()   BD -> data/tiendas.csv, plantas.csv, almacenes.csv y vetos_*.csv  (lo que lee la librería)
-  lanzar(semana, ...)   ejecuta la optimización en segundo plano (escribe code/salidas/<semana>/)
-  importar_plan(semana) code/salidas/<semana>/plan.json -> viajes, camiones asignados, reposiciones
+  lanzar(semana, ...)   ejecuta la optimización en segundo plano (plan en la tabla planes y copia en code/salidas/)
+  importar_plan(semana) plan de la semana -> viajes, camiones asignados, reposiciones
 
-Los pedidos de la semana ya los ha volcado `logistica.cerrar_semana` a la tabla `pedidos` de modare.
+No hay que exportar nada: la librería lee la red, los vetos, los parámetros, los vehículos, las tarifas y las
+distancias directamente de la base de datos (modare.datos.cargar_datos), así que optimiza con lo que haya en la
+app en ese momento. Los pedidos de la semana ya los ha volcado `logistica.cerrar_semana` a la tabla
+pedidos_optimizador.
 """
 from __future__ import annotations
 
@@ -15,114 +16,25 @@ import threading
 import traceback
 from collections import defaultdict
 
-import pandas as pd
-
 from modare import config as C
 from modare import bd as BD
 from modare.planificador import cargar_plan
 
-from .modelos import (Almacen, CamionReparto, CamionTroncal, LineaReposicion, Pedido, Planta, Reposicion, Tienda,
-                      Viaje, db)
-
-ETIQUETA_APP = "APP"                  # etiqueta de las filas creadas/editadas desde la app
+from .modelos import Almacen, CamionReparto, CamionTroncal, LineaReposicion, Pedido, Reposicion, Viaje, db
 
 
-# ----------------------------------------------------------------------------- 1. exportar
-def _igual(viejo, nuevo) -> bool:
-    """Evita reescribir valores iguales (1500 vs 1500.0) para no ensuciar el diff de data/ en git."""
-    if pd.isna(viejo) and (nuevo is None or nuevo == "" or (isinstance(nuevo, float) and pd.isna(nuevo))):
-        return True
-    try:
-        return float(viejo) == float(nuevo)
-    except (TypeError, ValueError):
-        return str(viejo) == str(nuevo)
-
-
-def _sincronizar_csv(fichero: str, clave: str, filas: list[dict]):
-    """Actualiza las columnas indicadas de cada fila (por id) y añade las nuevas. El resto de columnas
-    del CSV (fuentes, etiquetas…) se conserva; las ids que ya no existen en la BD se marcan inactivas."""
-    ruta = C.DATA_DIR / fichero
-    df = pd.read_csv(ruta, encoding="utf-8", dtype=object)
-    col_activa = "activo" if "activo" in df.columns else "activa"
-    df = df.set_index(clave)
-    ids_bd = set()
-    for f in filas:
-        i = f.pop(clave)
-        ids_bd.add(i)
-        if i not in df.index:
-            df.loc[i] = pd.NA
-        for k, v in f.items():
-            if k in df.columns and not _igual(df.at[i, k], v):
-                df.at[i, k] = v
-    for i in set(df.index) - ids_bd:
-        if not _igual(df.at[i, col_activa], 0):
-            df.at[i, col_activa] = "0"
-    df.reset_index().to_csv(ruta, index=False, encoding="utf-8")
-
-
-def exportar_maestros():
-    """Vuelca plantas, almacenes y tiendas de la BD a los CSV que lee la librería de rutas.
-    Nota: si se añade un punto nuevo, la librería usa línea recta × factor_rodeo hasta que se regenere
-    data/distancias.csv con `python calcular_distancias.py`."""
-    _sincronizar_csv("plantas.csv", "id_planta", [
-        {"id_planta": p.id, "nombre": p.nombre, "direccion": p.direccion, "municipio": p.municipio,
-         "provincia": p.provincia, "lat": p.lat, "lon": p.lon, "activa": int(p.activa),
-         "capacidad_salida_kg_semana": p.capacidad_salida_kg_semana, "hora_inicio_carga": p.hora_inicio_carga,
-         "hora_fin_carga": p.hora_fin_carga, "apertura_prevista": p.apertura_prevista}
-        for p in Planta.query])
-    _sincronizar_csv("almacenes.csv", "id_almacen", [
-        {"id_almacen": a.id, "nombre": a.nombre, "provincia": a.provincia, "poligono": a.poligono,
-         "municipio": a.municipio, "lat": a.lat, "lon": a.lon, "capacidad_kg_semana": a.capacidad_kg_semana,
-         "hora_inicio_carga": a.hora_inicio, "hora_fin_carga": a.hora_fin, "dias_recepcion": a.dias_recepcion,
-         "tiempo_descarga_min": 45, "activo": int(a.activo)}
-        for a in Almacen.query])
-    filas = []
-    for t in Tienda.query:
-        filas.append({
-            "id_tienda": t.id, "nombre": t.nombre, "subtipo": t.subtipo, "direccion": t.direccion,
-            "municipio": t.municipio, "provincia": t.provincia, "ccaa": t.ccaa, "lat": t.lat, "lon": t.lon,
-            "acceso_carretera": int(t.acceso_carretera), "superficie_m2": t.superficie_m2,
-            "categoria_tamano": t.categoria_tamano, "ventas_periodo": t.ventas_anuales_eur or 0,
-            "ventas_unidad": "EUR", "dias_recepcion": t.dias_recepcion, "ventana_inicio": t.ventana_inicio,
-            "ventana_fin": t.ventana_fin, "tiempo_descarga_min": t.tiempo_descarga_min,
-            "vehiculo_max": t.vehiculo_max, "activa": int(t.activa),
-            "fecha_alta": t.fecha_alta.isoformat() if t.fecha_alta else None})
-    # las tiendas nuevas necesitan las columnas obligatorias que la librería espera
-    df = pd.read_csv(C.DATA_DIR / "tiendas.csv", encoding="utf-8", usecols=["id_tienda"])
-    for f in filas:
-        if f["id_tienda"] not in set(df.id_tienda):
-            f.update(en_muestra=0, ubicacion_etiqueta=ETIQUETA_APP, recepcion_etiqueta=ETIQUETA_APP,
-                     ventas_etiqueta=ETIQUETA_APP, periodo_ventas="anual")
-    _sincronizar_csv("tiendas.csv", "id_tienda", filas)
-    exportar_vetos()
-
-
-def exportar_vetos():
-    """data/vetos_almacen_planta.csv y data/vetos_tienda_almacen.csv: lo que cada almacén y cada tienda ha
-    vetado. La asignación de la librería lo respeta; todo lo demás está permitido."""
-    vetos = {
-        "vetos_almacen_planta.csv": (["id_almacen", "id_planta"],
-                                     sorted((a.id, p.id) for a in Almacen.query for p in a.plantas_vetadas)),
-        "vetos_tienda_almacen.csv": (["id_tienda", "id_almacen"],
-                                     sorted((t.id, a.id) for t in Tienda.query for a in t.almacenes_vetados)),
-    }
-    for fichero, (cols, filas) in vetos.items():
-        pd.DataFrame(filas, columns=cols).to_csv(C.DATA_DIR / fichero, index=False, encoding="utf-8")
-
-
-# ----------------------------------------------------------------------------- 2. ejecutar
-def lanzar(app, semana: str, *, segundos: int = 30, asignacion: str = "optimo", precio_co2: float = 0.0,
-           plantas_futuras: bool = False) -> bool:
-    """Exporta los maestros y lanza la optimización en un hilo. Al terminar importa el plan."""
+# ----------------------------------------------------------------------------- 1. ejecutar
+def lanzar(app, semana: str, *, asignacion: str = "optimo", plantas_futuras: bool = False) -> bool:
+    """Lanza la optimización en un hilo (con los datos que haya en la base en ese momento) e importa el plan."""
     # el estado vive en la base de datos: lo ve cualquier proceso del servidor y sobrevive a un reinicio
     if not BD.reclamar_trabajo(semana):
         return False
-    exportar_maestros()
 
     def _run():
         from modare.planificador import planificar
         try:
-            planificar(semana, fuente="pedidos", asignacion=asignacion, segundos=segundos, precio_co2=precio_co2,
+            planificar(semana, fuente="pedidos", asignacion=asignacion, segundos=C.SEGUNDOS_BUSQUEDA,
+                       precio_co2=C.PRECIO_CO2_EUR_T,
                        plantas_futuras=plantas_futuras, log=lambda *a: None)
             with app.app_context():
                 res = importar_plan(semana)
@@ -135,7 +47,7 @@ def lanzar(app, semana: str, *, segundos: int = 30, asignacion: str = "optimo", 
     return True
 
 
-# ----------------------------------------------------------------------------- 3. importar
+# ----------------------------------------------------------------------------- 2. importar
 def _solapa(a, b):
     return a[0] < b[1] and b[0] < a[1]
 

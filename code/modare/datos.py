@@ -1,4 +1,4 @@
-"""Carga de los CSV de data/ y construcción de la demanda semanal (visitas)."""
+"""Carga de los datos desde la base de datos y construcción de la demanda semanal (visitas)."""
 from __future__ import annotations
 
 import math
@@ -39,19 +39,50 @@ def haversine_km(lat1, lon1, lat2, lon2) -> float:
 
 
 # ----------------------------------------------------------------------------- carga
-def _csv(nombre: str) -> pd.DataFrame:
+# Todo sale de la base de datos (MODARE_DB, la misma que la app de gestión). Los CSV de data/ solo son la
+# semilla con la que se crea la base (gestion/semilla.py) y la entrada de generar_almacenes.py.
+class BaseSinDatos(RuntimeError):
+    pass
+
+
+def valor_parametro(v):
+    """Los parámetros se guardan como texto: número si se puede (12 -> 12.0); si no, texto (VEH-R12;VEH-R18)."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return v
+
+
+def leer_csv(nombre: str) -> pd.DataFrame:
+    """Un CSV de data/ (solo para herramientas que preparan la semilla, como generar_almacenes.py)."""
     return pd.read_csv(C.DATA_DIR / nombre, encoding="utf-8")
 
 
+def parametros_csv() -> dict:
+    df = leer_csv("parametros.csv")
+    return {k: valor_parametro(v) for k, v in zip(df.clave, df.valor)}
+
+
+def _sql(consulta: str) -> pd.DataFrame:
+    from .bd import leer
+    try:
+        return leer(consulta)
+    except Exception as e:  # noqa: BLE001 — tabla inexistente: base sin crear o sin migrar
+        raise BaseSinDatos(
+            f"La base de datos no tiene los datos del optimizador ({e.__class__.__name__}). Arranca la app "
+            "(python app.py) o ejecuta  python -m gestion.semilla  para crearla desde data/*.csv.") from e
+
+
 def cargar_parametros() -> dict:
-    df = _csv("parametros.csv")
-    out = {}
-    for k, v in zip(df.clave, df.valor):
-        try:
-            out[k] = float(v)
-        except (TypeError, ValueError):
-            out[k] = v
-    return out
+    df = _sql("SELECT id, valor FROM parametros")
+    if df.empty:
+        raise BaseSinDatos("La tabla de parámetros está vacía: ejecuta  python -m gestion.semilla")
+    return {k: valor_parametro(v) for k, v in zip(df.id, df.valor)}
+
+
+def _vacios_a_nulo(df: pd.DataFrame) -> pd.DataFrame:
+    """En la app un campo de texto vacío se guarda como NULL, pero por si acaso: '' -> nulo."""
+    return df.replace({"": None})
 
 
 @dataclass
@@ -65,7 +96,7 @@ class Datos:
     km: dict = field(repr=False)   # (origen, destino) -> km
     mins: dict = field(repr=False) # (origen, destino) -> min de camión (sin pausas)
     coords: dict = field(repr=False)
-    # vetos (data/vetos_*.csv): por defecto todo almacén recibe de cualquier planta y toda tienda de cualquier almacén
+    # vetos (los decide la app): por defecto todo almacén recibe de cualquier planta y toda tienda de cualquier almacén
     plantas_vetadas: dict = field(default_factory=dict, repr=False)     # almacén -> {plantas que no quiere}
     almacenes_vetados: dict = field(default_factory=dict, repr=False)   # tienda  -> {almacenes que no quiere}
 
@@ -97,15 +128,51 @@ class Datos:
         raise KeyError(lugar)
 
 
-def cargar_datos() -> Datos:
+def cargar_datos(distancias: bool = True) -> Datos:
+    """Foto de la base de datos para una optimización. distancias=False no carga la matriz (pantallas que solo
+    necesitan la red: es lo más pesado, ~48.000 pares); entonces dist() usa línea recta × factor_rodeo."""
     P = cargar_parametros()
-    plantas = _csv("plantas.csv")
-    tiendas = _csv("tiendas.csv")
-    tiendas = tiendas[tiendas.activa == 1].copy()
+    plantas = _vacios_a_nulo(_sql(
+        "SELECT id AS id_planta, nombre, direccion, municipio, provincia, lat, lon, activa, apertura_prevista, "
+        "capacidad_salida_kg_semana, hora_inicio_carga, hora_fin_carga FROM plantas ORDER BY id"))
+    plantas["activa"] = plantas.activa.astype(int)
+    plantas["hora_inicio_carga"] = plantas.hora_inicio_carga.fillna("06:00")
+    plantas["hora_fin_carga"] = plantas.hora_fin_carga.fillna("18:00")
 
-    veh = _csv("vehiculos.csv")
-    emi = _csv("emisiones.csv")[["id_tipo", "kgco2e_km_vacio", "kgco2e_km_lleno"]]
-    tipos = veh.merge(emi, on="id_tipo", how="left")
+    tiendas = _vacios_a_nulo(_sql(
+        "SELECT id AS id_tienda, nombre, subtipo, direccion, municipio, provincia, ccaa, lat, lon, acceso_carretera, "
+        "superficie_m2, categoria_tamano, ventas_anuales_eur AS ventas_periodo, dias_recepcion, ventana_inicio, "
+        "ventana_fin, tiempo_descarga_min, vehiculo_max, en_muestra, planta_actual, activa FROM tiendas ORDER BY id"))
+    for c in ("acceso_carretera", "en_muestra", "activa"):
+        tiendas[c] = tiendas[c].astype(int)
+    tiendas = tiendas[tiendas.activa == 1].copy()
+    tiendas["ventas_periodo"] = tiendas.ventas_periodo.fillna(0).astype(float)
+    tiendas["ventas_unidad"] = "EUR"            # la app guarda ventas anuales en € (la semilla convierte los índices)
+    tiendas["categoria_tamano"] = tiendas.categoria_tamano.fillna("mediana")
+    tiendas["dias_recepcion"] = tiendas.dias_recepcion.fillna("L-V")
+    tiendas["tiempo_descarga_min"] = tiendas.tiempo_descarga_min.fillna(30).astype(int)
+
+    almacenes = _vacios_a_nulo(_sql(
+        "SELECT id AS id_almacen, nombre, provincia, poligono, municipio, lat, lon, capacidad_kg_semana, "
+        "hora_inicio AS hora_inicio_carga, hora_fin AS hora_fin_carga, dias_recepcion, tiempo_descarga_min, activo, "
+        "coste_fijo_eur_semana, coste_manipulacion_eur_kg FROM almacenes ORDER BY id"))
+    almacenes["activo"] = almacenes.activo.astype(int)
+    almacenes = almacenes[almacenes.activo == 1].copy()
+    if almacenes.empty:
+        raise BaseSinDatos("No hay ningún almacén activo en la base de datos")
+    almacenes["hora_inicio_carga"] = almacenes.hora_inicio_carga.fillna("06:00")
+    almacenes["hora_fin_carga"] = almacenes.hora_fin_carga.fillna("20:00")
+    almacenes["dias_recepcion"] = almacenes.dias_recepcion.fillna("L-V")
+    almacenes["tiempo_descarga_min"] = almacenes.tiempo_descarga_min.fillna(45).astype(int)
+    for c in ("coste_fijo_eur_semana", "coste_manipulacion_eur_kg"):
+        almacenes[c] = almacenes[c].astype(float)
+
+    tipos = _sql("SELECT id AS id_tipo, descripcion, mma_t, carga_util_kg, volumen_m3, capacidad_palets, "
+                 "kgco2e_km_vacio, kgco2e_km_lleno FROM tipos_vehiculo")
+    desconocidos = set(tipos.id_tipo) - set(C.ORDEN_TIPOS)
+    if desconocidos:
+        raise BaseSinDatos(f"Tipos de vehículo desconocidos para el optimizador: {sorted(desconocidos)} "
+                           f"(admitidos: {C.ORDEN_TIPOS})")
     # Consumo propio de cada camión (L/100 km) derivado de sus emisiones
     tipos["l100km_vacio"] = tipos.kgco2e_km_vacio / C.KG_CO2E_POR_LITRO_DIESEL * 100
     tipos["l100km_lleno"] = tipos.kgco2e_km_lleno / C.KG_CO2E_POR_LITRO_DIESEL * 100
@@ -116,38 +183,35 @@ def cargar_datos() -> Datos:
         int(min(p * cajas_por_palet, v / m3_por_caja)) for p, v in zip(tipos.capacidad_palets, tipos.volumen_m3)
     ]
     tipos["rango"] = tipos.id_tipo.map(C.ORDEN_TIPOS.index)
+    tipos = tipos.sort_values("rango").reset_index(drop=True)
 
-    tarifas = _csv("tarifas.csv")
+    tarifas = _sql("SELECT id AS id_tarifa, operador, tipo_vehiculo AS id_tipo, coste_fijo_dia_eur, coste_km_eur, "
+                   "coste_hora_eur, unidades_disponibles FROM tarifas")
+    tarifas = (tarifas.assign(_r=tarifas.id_tipo.map(C.ORDEN_TIPOS.index))
+               .sort_values(["operador", "_r"]).drop(columns="_r").reset_index(drop=True))
     mult = P.get("multiplicador_tarifas", 1.0)
     for c in ("coste_fijo_dia_eur", "coste_km_eur", "coste_hora_eur"):
-        tarifas[c] = tarifas[c].fillna(0) * mult
+        tarifas[c] = tarifas[c].astype(float).fillna(0) * mult
+    tarifas["unidades_disponibles"] = tarifas.unidades_disponibles.astype(float)   # NaN = ilimitado
 
-    dist = _csv("distancias.csv")
-    km = dict(zip(zip(dist.origen, dist.destino), dist.distancia_km))
-    mins = dict(zip(zip(dist.origen, dist.destino), dist.duracion_camion_min))
-
-    f_alm = C.DATA_DIR / "almacenes.csv"
-    if not f_alm.exists():
-        raise FileNotFoundError("Falta data/almacenes.csv: ejecuta  python generar_almacenes.py")
-    almacenes = _csv("almacenes.csv")
-    almacenes = almacenes[almacenes.activo == 1].copy()
+    km, mins = {}, {}
+    if distancias:
+        dist = _sql("SELECT origen, destino, distancia_km, duracion_camion_min FROM distancias")
+        km = dict(zip(zip(dist.origen, dist.destino), dist.distancia_km))
+        mins = dict(zip(zip(dist.origen, dist.destino), dist.duracion_camion_min))
 
     coords = {r.id_planta: (r.lat, r.lon) for r in plantas.itertuples()}
     coords.update({r.id_almacen: (r.lat, r.lon) for r in almacenes.itertuples()})
     coords.update({r.id_tienda: (r.lat, r.lon) for r in tiendas.itertuples()})
     return Datos(P, plantas, almacenes, tiendas, tipos, tarifas, km, mins, coords,
-                 _cargar_vetos("vetos_almacen_planta.csv", "id_almacen", "id_planta"),
-                 _cargar_vetos("vetos_tienda_almacen.csv", "id_tienda", "id_almacen"))
+                 _cargar_vetos("SELECT almacen_id, planta_id FROM almacen_plantas_vetadas"),
+                 _cargar_vetos("SELECT tienda_id, almacen_id FROM tienda_almacenes_vetados"))
 
 
-def _cargar_vetos(fichero: str, col_quien: str, col_vetado: str) -> dict[str, set[str]]:
-    """Fichero de vetos opcional (p. ej. vetos_almacen_planta.csv: id_almacen, id_planta).
-    Cada fila = «quien» no quiere recibir de «vetado». Si el fichero no existe, no hay vetos."""
-    f = C.DATA_DIR / fichero
-    if not f.exists():
-        return {}
+def _cargar_vetos(consulta: str) -> dict[str, set[str]]:
+    """Vetos de la app: cada fila = «quien» no quiere recibir de «vetado». Sin filas, no hay vetos."""
     out: dict[str, set[str]] = {}
-    for q, v in pd.read_csv(f, encoding="utf-8")[[col_quien, col_vetado]].itertuples(index=False):
+    for q, v in _sql(consulta).itertuples(index=False):
         out.setdefault(q, set()).add(v)
     return out
 

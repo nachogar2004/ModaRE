@@ -32,8 +32,10 @@ Desde la carpeta `code/`:
 Abrir `http://127.0.0.1:5000` (o el puerto indicado; en macOS el 5000 lo ocupa AirPlay).
 
 En desarrollo, la primera vez la app crea **`code/gestion.db`** (SQLite) con las migraciones y la rellena a partir
-de los CSV de `data/`: 182 tiendas, 6 plantas (4 activas), 38 almacenes, una flota inicial y un usuario por cada
-tienda, planta y almacén. Para empezar de cero: `python -m gestion.semilla --reset` (¡borra todo!).
+de los CSV de `data/`: 175 tiendas, 6 plantas (4 activas), 38 almacenes, una flota inicial, un usuario por cada
+tienda, planta y almacén, y los datos del optimizador (parámetros, tipos de vehículo, tarifas y distancias).
+A partir de ahí **la base de datos es la única fuente**: los CSV solo sirven para crearla. Para empezar de cero
+(por ejemplo, si cambian los CSV): `python -m gestion.semilla --reset` (¡borra todo lo hecho en la app!).
 Para uso real (PostgreSQL, servidor, copias) ver [§12](#12-uso-real-base-de-datos-y-despliegue).
 
 **Accesos iniciales** (cámbialos en *Mi cuenta*):
@@ -41,7 +43,7 @@ Para uso real (PostgreSQL, servidor, copias) ver [§12](#12-uso-real-base-de-dat
 | Usuario | Contraseña |
 |---|---|
 | `admin` | `admin` |
-| tiendas `td-001` … `td-182`, plantas `pl-mad`, `pl-val`…, almacenes `al-madrid`, `al-sevilla`… | `modare2026` |
+| tiendas `td-001` … `td-175`, plantas `pl-mad`, `pl-val`…, almacenes `al-madrid`, `al-sevilla`… | `modare2026` |
 
 Todas las variables de entorno están explicadas en [`code/.env.example`](../code/.env.example).
 
@@ -121,11 +123,12 @@ de cualquiera.
 | **Panel** | Indicadores, alertas, ocupación de plantas y almacenes; botón para generar pedidos automáticos. |
 | **Planificación** | El ciclo semanal (ver §4). |
 | **Pedidos** | Todos los pedidos, con filtros por semana, estado, tipo y tienda. |
-| **Tiendas, Plantas, Almacenes** | Alta, edición, baja. Al dar de alta se crea su usuario con contraseña aleatoria (se muestra una vez). |
+| **Tiendas, Plantas, Almacenes** | Alta, edición, baja. Al dar de alta se crea su usuario con contraseña aleatoria (se muestra una vez). En los almacenes, también sus costes (fijo semanal y manipulación) y el tiempo de descarga; en las tiendas, si están en la muestra de pruebas y la planta que las sirve hoy. |
+| **Optimizador → Parámetros, Tipos de vehículo, Tarifas** | Los supuestos con los que calcula el optimizador (kg por palé, jornada, frecuencias, capacidades y emisiones de cada vehículo, €/km, €/h, €/día…). Se editan, no se añaden ni se borran; el cambio entra en la siguiente optimización. |
 | **Camiones troncal / reparto** | Flotas por separado: matrícula, tipo, capacidad, operador, conductor, estado, ITV, km. |
 | **Usuarios** | Crear, editar, desactivar; asignar rol y tienda/planta/almacén. |
 | **Movimientos** | Auditoría de cada cambio de stock: quién, cuándo, cuánto y por qué. |
-| **Optimizador** | Herramienta avanzada original (escenarios con demanda estimada, mapa y analítica). |
+| **Optimizador avanzado** | Herramienta avanzada original (escenarios con demanda estimada, mapa y analítica). |
 
 **Eliminar**: si el elemento no tiene historial se borra; si lo tiene (ventas, pedidos, viajes,
 movimientos…) se **da de baja** y se conserva el histórico. Los dados de baja se ven con
@@ -249,14 +252,20 @@ El optimizador es el paquete `code/modare`. La app habla con él **solo a travé
 | Dirección | Qué | Dónde |
 |---|---|---|
 | App → librería | pedidos de la semana, en kg y cajas por tienda | tabla `pedidos_optimizador` (misma base de datos) |
-| App → librería | tiendas, plantas, almacenes (altas, bajas, cambios) | `data/tiendas.csv`, `plantas.csv`, `almacenes.csv` |
-| App → librería | vetos de almacenes y tiendas | `data/vetos_almacen_planta.csv`, `data/vetos_tienda_almacen.csv` |
+| App → librería | tiendas, plantas, almacenes y sus vetos (altas, bajas, cambios) | sus tablas (`tiendas`, `plantas`, `almacenes`, `*_vetad*`) |
+| App → librería | parámetros, tipos de vehículo, tarifas | tablas `parametros`, `tipos_vehiculo`, `tarifas` (Admin → Optimizador) |
+| App → librería | distancias por carretera | tabla `distancias` (botón «Calcular distancias» en Planificación) |
 | Librería → app | rutas, paradas, almacén y planta asignados, KPIs | tabla `planes` (y copia en `code/salidas/<semana>/`: `plan.json`, CSV, `mapa.html`) |
 | Ambas | estado de cada optimización (calculando / ok / error) | tabla `trabajos_optimizacion` |
 
-- La exportación solo reescribe los valores que han cambiado, para que el `git diff` de `data/` sea legible.
-- Si se añade o se mueve una tienda, planta o almacén, la librería calcula sus distancias en línea recta × 1,26
-  hasta que se regeneren las distancias por carretera con `python calcular_distancias.py`.
+- No hay que exportar nada: cada optimización lee la base de datos en ese momento, así que cualquier cambio
+  hecho en la app (una tienda nueva, un veto, una tarifa, un parámetro) entra en la siguiente optimización.
+- **Parámetros, tipos de vehículo y tarifas** (menú *Optimizador*) se pueden editar pero no añadir ni borrar,
+  porque el optimizador los necesita todos. Un parámetro numérico no admite texto.
+- Si se añade o se mueve una tienda, planta o almacén, sus distancias por carretera dejan de valer: la app las
+  borra y en *Planificación* aparece un aviso con el botón **Calcular distancias (OSRM)**, que calcula solo las
+  de esos puntos (unos segundos por punto). Mientras tanto el optimizador usa línea recta × 1,26. Lo mismo desde
+  la consola: `python calcular_distancias.py`.
 - Las tiendas sin acceso por carretera (Baleares) quedan fuera de las rutas. Se avisan y su pedido se puede
   cargar a mano.
 
@@ -330,8 +339,8 @@ cambiar desde la app y conviene sustituirlo por datos reales:
 - No hay límite de intentos de inicio de sesión: conviene ponerlo en el proxy (nginx, Cloudflare…).
 - La optimización corre en un hilo del proceso web: si el servidor se reinicia mientras calcula, queda marcada
   como interrumpida y hay que relanzarla. Para muchos usuarios a la vez, moverla a una cola de tareas (RQ, Celery).
-- Los CSV de `data/` y `code/salidas/` se escriben en el disco del servidor; la app no depende de ellos para
-  funcionar (los planes están en la base), pero el mapa HTML de `salidas/` se pierde si el disco es efímero.
+- `code/salidas/` se escribe en el disco del servidor; la app no depende de ello para funcionar (los planes están
+  en la base), pero el mapa HTML de `salidas/` se pierde si el disco es efímero.
 
 ---
 
@@ -342,8 +351,8 @@ cambiar desde la app y conviene sustituirlo por datos reales:
 | Qué | Dónde |
 |---|---|
 | Todo lo de la app y del optimizador (usuarios, stock, pedidos, rutas, planes, estado de las optimizaciones) | **la base de datos** de `MODARE_DB` |
-| Datos de partida y parámetros del modelo (vehículos, tarifas, distancias, parámetros) | `data/*.csv` en git |
-| Entrada que la app genera para el optimizador (tiendas, plantas, almacenes, vetos) | `data/*.csv`, se reescriben al optimizar |
+| Red, vetos y datos del modelo (parámetros, vehículos, tarifas, distancias) | **la base de datos** (los edita la app) |
+| Semilla con la que se crea una base nueva | `data/*.csv` en git (solo se leen al crear la base) |
 | Copias legibles de cada plan (mapa, CSV) | `code/salidas/<semana>/` (prescindibles) |
 
 La fuente de verdad es la base de datos. Nunca se sube a git.

@@ -1,6 +1,7 @@
 """Base de datos de la librería de rutas: la MISMA que la app de gestión (variable MODARE_DB).
 
-La librería guarda aquí lo que antes iba a ficheros sueltos:
+La librería LEE de aquí todos sus datos (modare.datos.cargar_datos: plantas, almacenes, tiendas, vetos, parametros,
+tipos_vehiculo, tarifas, distancias; tablas definidas en gestion/modelos.py) y GUARDA lo que antes iba a ficheros:
   pedidos_optimizador     pedido semanal de cada tienda (kg y cajas): la entrada del optimizador
   planes                  el plan de cada semana (lo mismo que salidas/<semana>/plan.json)
   trabajos_optimizacion   estado de cada optimización (calculando / ok / error), visible desde cualquier proceso
@@ -72,6 +73,14 @@ def engine() -> sa.Engine:
             # crea solo lo que falte (en la app las crean las migraciones; esto cubre el uso desde la CLI)
             metadata.create_all(_engine, checkfirst=True)
         return _engine
+
+
+def leer(consulta: str, **params):
+    """Consulta de solo lectura -> DataFrame. La usa modare.datos para leer los datos del optimizador
+    (red, vetos, parámetros, vehículos, tarifas y distancias), que son tablas de la app (gestion/modelos.py)."""
+    import pandas as pd
+    with engine().connect() as con:
+        return pd.read_sql_query(sa.text(consulta), con, params=params or None)
 
 
 def ahora() -> dt.datetime:

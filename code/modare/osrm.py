@@ -117,6 +117,30 @@ def matriz(puntos: list[tuple[float, float]], bloque: int = 50, log=print):
     return km, mins
 
 
+def matriz_parcial(puntos: list[tuple[float, float]], nuevos: list[int], bloque: int = 50, log=print) -> dict:
+    """Solo los pares en los que interviene algún punto de `nuevos` (índices de `puntos`), en ambos sentidos:
+    {(i, j): (km, min)} con None si OSRM no encuentra ruta. Para 1 punto nuevo frente a ~220 son ~5 consultas."""
+    n_blq = max(1, bloque // 2)
+    trozos_n = [nuevos[i:i + n_blq] for i in range(0, len(nuevos), n_blq)]
+    trozos_t = [list(range(i, min(i + bloque, len(puntos)))) for i in range(0, len(puntos), bloque)]
+    out, total, hecho = {}, len(trozos_n) * len(trozos_t), 0
+    for N in trozos_n:
+        for T in trozos_t:
+            idx = N + [j for j in T if j not in N]
+            data = _get(f"/table/v1/driving/{_coords([puntos[k] for k in idx])}?annotations=distance,duration")
+            pos = {k: a for a, k in enumerate(idx)}
+            for i in N:
+                for j in idx:
+                    if i == j:
+                        continue
+                    for o, d in ((i, j), (j, i)):
+                        dist, dur = data["distances"][pos[o]][pos[d]], data["durations"][pos[o]][pos[d]]
+                        out[(o, d)] = (None if dist is None else dist / 1000, None if dur is None else dur / 60)
+            hecho += 1
+            log(f"  OSRM tabla {hecho}/{total}")
+    return out
+
+
 # ----------------------------------------------------------------------------- trazados de rutas
 def _decodificar(s: str) -> list[list[float]]:
     """Polyline de Google (precisión 5) -> [[lat, lon], ...]."""

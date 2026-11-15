@@ -17,8 +17,6 @@
         <option value="optimo">Óptima (respeta capacidad de planta)</option>
         <option value="actual">La actual (planta_actual)</option>
       </select>
-      <label>Segundos de búsqueda por planta</label><input type="number" name="segundos" value="30" min="5" max="600">
-      <label>Precio del CO₂ en el objetivo (€/t)</label><input type="number" name="precio_co2" value="0" min="0" step="10">
       <label><input type="checkbox" name="plantas_futuras" value="1" style="width:auto"> Incluir plantas futuras (Asturias, Santiago)</label>
       <p>
       {% if trabajo and trabajo.estado == 'calculando' %}
