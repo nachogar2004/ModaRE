@@ -44,6 +44,11 @@
         {{ enlace(url_for('admin.lista', ent='camiones-troncal'), 'truck', 'Camiones troncales', ruta.startswith('/admin/camiones-troncal')) }}
         {{ enlace(url_for('admin.lista', ent='camiones-reparto'), 'van', 'Camiones de reparto', ruta.startswith('/admin/camiones-reparto')) }}
       </div>
+      <div class="nav-group"><span>Optimizador</span>
+        {{ enlace(url_for('admin.lista', ent='parametros'), 'sliders', 'Parámetros', ruta.startswith('/admin/parametros')) }}
+        {{ enlace(url_for('admin.lista', ent='vehiculos'), 'layers', 'Tipos de vehículo', ruta.startswith('/admin/vehiculos')) }}
+        {{ enlace(url_for('admin.lista', ent='tarifas'), 'clipboard', 'Tarifas', ruta.startswith('/admin/tarifas')) }}
+      </div>
       <div class="nav-group"><span>Sistema</span>
         {{ enlace(url_for('admin.lista', ent='usuarios'), 'users', 'Usuarios', ruta.startswith('/admin/usuarios')) }}
         {{ enlace(url_for('admin.lista', ent='categorias'), 'tag', 'Categorías de prenda', ruta.startswith('/admin/categorias')) }}

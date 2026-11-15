@@ -11,6 +11,7 @@ import datetime as dt
 import math
 import sqlite3
 
+import sqlalchemy as sa
 from flask_login import UserMixin
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import event
@@ -176,6 +177,10 @@ class Almacen(db.Model):
     hora_inicio = db.Column(db.String(5), default="06:00")
     hora_fin = db.Column(db.String(5), default="20:00")
     dias_recepcion = db.Column(db.String(5), default="L-V")
+    tiempo_descarga_min = db.Column(db.Integer, default=45, server_default="45", nullable=False)
+    # costes que usa el optimizador para decidir qué almacenes abrir (vacío = mediana de los demás)
+    coste_fijo_eur_semana = db.Column(db.Float)               # alquiler + gastos + gestión
+    coste_manipulacion_eur_kg = db.Column(db.Float)           # €/h operario ÷ kg/h
     planta_id = db.Column(db.String(16), db.ForeignKey("plantas.id"))   # planta que lo repuso en el último plan
     responsable = db.Column(db.String(120))
     telefono = db.Column(db.String(30))
@@ -230,6 +235,9 @@ class Tienda(db.Model):
     dias_seguridad = db.Column(db.Integer, default=3)         # colchón de stock de seguridad (días de venta)
     pedido_auto_activo = db.Column(db.Boolean, default=True, nullable=False)
     capacidad_max_prendas = db.Column(db.Integer)             # lo que cabe en tienda + trastienda
+    # optimizador
+    en_muestra = db.Column(db.Boolean, default=False, server_default=sa.false(), nullable=False)  # --muestra (pruebas)
+    planta_actual = db.Column(db.String(16))                  # planta que la sirve hoy (escenario «asignación actual»)
     # contacto
     responsable = db.Column(db.String(120))
     telefono = db.Column(db.String(30))
@@ -447,6 +455,65 @@ class LineaReposicion(db.Model):
     categoria_id = db.Column(db.String(16), db.ForeignKey("categorias.id"), primary_key=True)
     unidades = db.Column(db.Integer, nullable=False)
     categoria = db.relationship("Categoria", lazy="joined")
+
+
+# ----------------------------------------------------------------------------- datos del optimizador
+# Lo que antes leía la librería de rutas de data/*.csv. Los CSV quedan solo como semilla de la primera carga
+# (gestion/basedatos.py). La librería lee estas tablas por nombre (modare/datos.py): si se renombra una
+# columna, hay que adaptarla allí.
+class Parametro(db.Model):
+    """Supuestos de negocio del optimizador (antes data/parametros.csv)."""
+    __tablename__ = "parametros"
+    id = db.Column(db.String(60), primary_key=True)           # clave, p. ej. kg_por_palet
+    valor = db.Column(db.String(200), nullable=False)         # número o texto (tipos_troncal = VEH-R12;VEH-R18;…)
+    unidad = db.Column(db.String(30))
+    descripcion = db.Column(db.Text)
+    etiqueta = db.Column(db.String(12))                       # REAL / ESTIMADO / SINTÉTICO
+    fuente = db.Column(db.Text)
+
+
+class TipoVehiculo(db.Model):
+    """Tipo de vehículo con su capacidad y emisiones (antes data/vehiculos.csv + data/emisiones.csv)."""
+    __tablename__ = "tipos_vehiculo"
+    id = db.Column(db.String(10), primary_key=True)           # VEH-FUR, VEH-R75, VEH-R12, VEH-R18, VEH-ART
+    descripcion = db.Column(db.String(120), nullable=False)
+    mma_t = db.Column(db.Float)
+    carga_util_kg = db.Column(db.Float, nullable=False)
+    volumen_m3 = db.Column(db.Float, nullable=False)
+    capacidad_palets = db.Column(db.Integer, nullable=False)
+    combustible = db.Column(db.String(20))
+    kgco2e_km_vacio = db.Column(db.Float, nullable=False)
+    kgco2e_km_lleno = db.Column(db.Float, nullable=False)
+    etiqueta = db.Column(db.String(12))
+    fuente = db.Column(db.Text)
+    fuente_emisiones = db.Column(db.Text)
+
+
+class Tarifa(db.Model):
+    """Tarifa de un operador para un tipo de vehículo (antes data/tarifas.csv)."""
+    __tablename__ = "tarifas"
+    id = db.Column(db.String(20), primary_key=True)           # TAR-A-FUR
+    operador = db.Column(db.String(20), nullable=False)       # Operador A (€/km + €/h) / Operador B (€/día + €/km)
+    tipo_vehiculo = db.Column(db.String(10), db.ForeignKey("tipos_vehiculo.id"), nullable=False)
+    coste_fijo_dia_eur = db.Column(db.Float, default=0)
+    coste_km_eur = db.Column(db.Float, default=0)
+    coste_hora_eur = db.Column(db.Float, default=0)
+    unidades_disponibles = db.Column(db.Integer)              # vacío = ilimitado; si no, por depósito y día
+    etiqueta = db.Column(db.String(12))
+    fuente = db.Column(db.Text)
+
+
+class Distancia(db.Model):
+    """Distancia y tiempo por carretera entre dos puntos de la red (antes data/distancias.csv).
+    Si falta un par, el optimizador usa línea recta × factor_rodeo."""
+    __tablename__ = "distancias"
+    origen = db.Column(db.String(24), primary_key=True)
+    destino = db.Column(db.String(24), primary_key=True)
+    distancia_km = db.Column(db.Float, nullable=False)
+    duracion_min = db.Column(db.Float)                        # coche
+    duracion_camion_min = db.Column(db.Float, nullable=False)  # coche × factor_tiempo_camion
+    metodo = db.Column(db.String(20))                         # OSRM / HAVERSINE_X1.26
+    calculada = db.Column(db.Date)
 
 
 class Ajuste(db.Model):

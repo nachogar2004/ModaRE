@@ -14,8 +14,8 @@ Los almacenes tienen coste (data/almacenes.csv): un fijo semanal si están abier
          Σ_s kg_s · x[s,a] ≤ capacidad_a        ∀ almacén a
          Σ_p f[a,p] = Σ_s kg_s · x[s,a]         ∀ almacén a  (conservación del flujo)
          Σ_a f[a,p] ≤ capacidad_salida_p        ∀ planta p   (solo plantas activas)
-         f[a,p] solo existe si el almacén a no ha vetado la planta p   (data/vetos_almacen_planta.csv)
-         x[s,a] = 0 si la tienda s ha vetado el almacén a              (data/vetos_tienda_almacen.csv)
+         f[a,p] solo existe si el almacén a no ha vetado la planta p   (tabla almacen_plantas_vetadas)
+         x[s,a] = 0 si la tienda s ha vetado el almacén a              (tabla tienda_almacenes_vetados)
 
 Estimación del transporte en € (calibrada con el coste real de las rutas, ver parametros.csv):
     R(s,a) = factor_coste_reparto × nº entregas_s × (2·km(a,s)·€/km + 2·h(a,s)·€/h)   camión de 7,5 t, operador A

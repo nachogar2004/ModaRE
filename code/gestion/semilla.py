@@ -3,7 +3,9 @@
     .venv/bin/python -m gestion.semilla            # prepara la base (MODARE_DB) y la rellena si está vacía
     .venv/bin/python -m gestion.semilla --reset    # BORRA todo y la vuelve a crear con datos de ejemplo
 
-Lo que viene de los CSV (plantas, almacenes, tiendas, tipos de vehículo) es el dato del reto.
+Los CSV de data/ son SOLO la semilla: después la base de datos es la única fuente, tanto de la app como del
+optimizador de rutas. Lo que viene de los CSV es el dato del reto: plantas, almacenes, tiendas y los datos del
+optimizador (parámetros, tipos de vehículo con sus emisiones, tarifas y distancias por carretera).
 Lo que se inventa aquí está marcado como SINTÉTICO y se puede cambiar desde la app:
 catálogo de categorías (peso y precio por prenda), stock inicial, historial de ventas de 8 semanas,
 flota de camiones (matrículas ficticias) y usuarios con contraseña inicial.
@@ -15,16 +17,17 @@ import datetime as dt
 import math
 import os
 import random
+import re
 import unicodedata
 
 import pandas as pd
 from sqlalchemy import insert
 
 from modare import config as C
-from modare.datos import cargar_parametros, kg_semana_estimado
+from modare.datos import kg_semana_estimado, valor_parametro
 
-from .modelos import (SEGMENTOS, TIPOS_PRENDA, Almacen, CamionReparto, CamionTroncal, Categoria, Planta,
-                      StockPlanta, StockTienda, Tienda, Usuario, Venta, db)
+from .modelos import (SEGMENTOS, TIPOS_PRENDA, Ajuste, Almacen, CamionReparto, CamionTroncal, Categoria, Distancia,
+                      Parametro, Planta, StockPlanta, StockTienda, Tarifa, Tienda, TipoVehiculo, Usuario, Venta, db)
 
 PASSWORD_INICIAL = os.environ.get("MODARE_PASSWORD_INICIAL", "modare2026")
 PASSWORD_ADMIN = os.environ.get("MODARE_PASSWORD_ADMIN", "admin")
@@ -43,12 +46,16 @@ TIPOS_TRONCAL = ["VEH-R12", "VEH-R18", "VEH-ART"]
 TIPOS_REPARTO = ["VEH-FUR", "VEH-R75", "VEH-R12", "VEH-R18"]
 
 
-def _csv(nombre):
-    return pd.read_csv(C.DATA_DIR / nombre, encoding="utf-8")
+def _csv(nombre, **kw):
+    return pd.read_csv(C.DATA_DIR / nombre, encoding="utf-8", **kw)
 
 
 def _txt(v, defecto=None):
     return defecto if pd.isna(v) else str(v)
+
+
+def _num(v):
+    return None if pd.isna(v) else float(v)
 
 
 def _slug(s: str) -> str:
@@ -56,17 +63,95 @@ def _slug(s: str) -> str:
     return "".join(ch for ch in s.upper() if ch.isalnum())
 
 
+def parametros() -> dict:
+    """Parámetros del optimizador leídos con la sesión de la app (ve también lo aún no confirmado)."""
+    return {p.id: valor_parametro(p.valor) for p in Parametro.query}
+
+
 def capacidad_vehiculos() -> dict[str, dict]:
     """carga útil, palés y cajas de cada tipo de vehículo (misma regla que modare.datos)."""
-    P = cargar_parametros()
+    P = parametros()
     m3_caja = C.KG_POR_CAJA / P["densidad_kg_m3"]
     out = {}
-    for r in _csv("vehiculos.csv").itertuples():
-        out[r.id_tipo] = {"descripcion": r.descripcion, "carga_util_kg": float(r.carga_util_kg),
-                          "capacidad_palets": int(r.capacidad_palets),
-                          "capacidad_cajas": int(min(r.capacidad_palets * P["kg_por_palet"] / C.KG_POR_CAJA,
-                                                     r.volumen_m3 / m3_caja))}
+    for r in TipoVehiculo.query.order_by(TipoVehiculo.carga_util_kg):
+        out[r.id] = {"descripcion": r.descripcion, "carga_util_kg": float(r.carga_util_kg),
+                     "capacidad_palets": int(r.capacidad_palets),
+                     "capacidad_cajas": int(min(r.capacidad_palets * P["kg_por_palet"] / C.KG_POR_CAJA,
+                                                r.volumen_m3 / m3_caja))}
     return out
+
+
+# ----------------------------------------------------------------------------- datos del optimizador
+def crear_datos_optimizador(log=print):
+    """Rellena desde los CSV las tablas del optimizador que estén vacías: parámetros, tipos de vehículo (con
+    emisiones), tarifas y distancias. Lo que ya tenga datos no se toca (lo manda la base, no el CSV)."""
+    hechos = []
+    if not db.session.query(Parametro.id).first():
+        for r in _csv("parametros.csv", dtype=str).itertuples():
+            db.session.add(Parametro(id=r.clave, valor=r.valor, unidad=_txt(r.unidad), descripcion=_txt(r.descripcion),
+                                     etiqueta=_txt(r.etiqueta), fuente=_txt(r.fuente)))
+        hechos.append("parámetros")
+    if not db.session.query(TipoVehiculo.id).first():
+        emi = _csv("emisiones.csv").set_index("id_tipo")
+        for r in _csv("vehiculos.csv").itertuples():
+            e = emi.loc[r.id_tipo]
+            db.session.add(TipoVehiculo(
+                id=r.id_tipo, descripcion=r.descripcion, mma_t=_num(r.mma_t), carga_util_kg=float(r.carga_util_kg),
+                volumen_m3=float(r.volumen_m3), capacidad_palets=int(r.capacidad_palets), combustible=_txt(e.combustible),
+                kgco2e_km_vacio=float(e.kgco2e_km_vacio), kgco2e_km_lleno=float(e.kgco2e_km_lleno),
+                etiqueta=_txt(r.etiqueta), fuente=_txt(r.fuente), fuente_emisiones=_txt(e.fuente)))
+        db.session.flush()
+        hechos.append("tipos de vehículo")
+    if not db.session.query(Tarifa.id).first():
+        for r in _csv("tarifas.csv").itertuples():
+            db.session.add(Tarifa(
+                id=r.id_tarifa, operador=r.operador, tipo_vehiculo=r.id_tipo, coste_fijo_dia_eur=_num(r.coste_fijo_dia_eur),
+                coste_km_eur=_num(r.coste_km_eur), coste_hora_eur=_num(r.coste_hora_eur),
+                unidades_disponibles=None if pd.isna(r.unidades_disponibles) else int(r.unidades_disponibles),
+                etiqueta=_txt(r.etiqueta), fuente=_txt(r.fuente)))
+        hechos.append("tarifas")
+    if not db.session.query(Distancia.origen).first():
+        df = _csv("distancias.csv")
+        fecha = {f: _fecha_en(f) for f in df.fuente.dropna().unique()}
+        filas = [{"origen": r.origen, "destino": r.destino, "distancia_km": float(r.distancia_km),
+                  "duracion_min": _num(r.duracion_min), "duracion_camion_min": float(r.duracion_camion_min),
+                  "metodo": _txt(r.metodo), "calculada": fecha.get(r.fuente)} for r in df.itertuples()]
+        db.session.flush()
+        db.session.execute(insert(Distancia), filas)
+        hechos.append(f"{len(filas)} distancias")
+    if hechos:
+        db.session.commit()
+        log("Datos del optimizador cargados desde data/*.csv: " + ", ".join(hechos) + ".")
+
+
+def _fecha_en(texto: str) -> dt.date | None:
+    m = re.search(r"\d{4}-\d{2}-\d{2}", str(texto))
+    return dt.date.fromisoformat(m.group()) if m else None
+
+
+def completar_red_desde_csv(log=print):
+    """Una sola vez, en bases creadas antes de que el optimizador leyera de la base: copia de los CSV los datos
+    de la red que la app no guardaba (costes y descarga de los almacenes, muestra y planta actual de las tiendas)."""
+    if Ajuste.get("red_completada_desde_csv") == "1":
+        return
+    alm = _csv("almacenes.csv").set_index("id_almacen")
+    for a in Almacen.query:
+        if a.id in alm.index:
+            r = alm.loc[a.id]
+            a.tiempo_descarga_min = int(r.tiempo_descarga_min)
+            if a.coste_fijo_eur_semana is None:
+                a.coste_fijo_eur_semana = _num(r.coste_fijo_eur_semana)
+            if a.coste_manipulacion_eur_kg is None:
+                a.coste_manipulacion_eur_kg = _num(r.coste_manipulacion_eur_kg)
+    tie = _csv("tiendas.csv").set_index("id_tienda")
+    for t in Tienda.query:
+        if t.id in tie.index:
+            r = tie.loc[t.id]
+            t.en_muestra = bool(r.en_muestra)
+            t.planta_actual = t.planta_actual or _txt(r.planta_actual)
+    Ajuste.set("red_completada_desde_csv", "1")
+    db.session.commit()
+    log("Red completada con los datos de data/*.csv que faltaban (costes de almacén, muestra, planta actual).")
 
 
 def crear_categorias():
@@ -87,7 +172,7 @@ def _reparto_por_categoria(total_prendas: float, cats) -> dict[str, int]:
 
 
 def crear_red(rng: random.Random):
-    P = cargar_parametros()
+    P = parametros()
     cats = Categoria.query.order_by(Categoria.orden).all()
     kg_medio = sum(c.cuota_ventas * c.kg_unidad for c in cats)   # kg por prenda vendida, en media
 
@@ -108,7 +193,9 @@ def crear_red(rng: random.Random):
                                municipio=_txt(r.municipio), lat=r.lat, lon=r.lon, stock_max_cajas=maxc,
                                stock_cajas=int(maxc * 0.25), capacidad_kg_semana=r.capacidad_kg_semana,
                                hora_inicio=r.hora_inicio_carga, hora_fin=r.hora_fin_carga,
-                               dias_recepcion=r.dias_recepcion, activo=bool(r.activo)))
+                               dias_recepcion=r.dias_recepcion, tiempo_descarga_min=int(r.tiempo_descarga_min),
+                               coste_fijo_eur_semana=_num(r.coste_fijo_eur_semana),
+                               coste_manipulacion_eur_kg=_num(r.coste_manipulacion_eur_kg), activo=bool(r.activo)))
     db.session.flush()     # sin vetos: cualquier planta repone cualquier almacén y cualquier almacén sirve a cualquier tienda
 
     hoy = dt.date.today()
@@ -130,6 +217,7 @@ def crear_red(rng: random.Random):
                    frecuencia_pedido="mensual" if cat_tam == "pequeña" else "semanal",
                    dia_pedido=1 if cat_tam == "pequeña" else 3, dias_seguridad=3,
                    capacidad_max_prendas=int(prendas_dia * 6 * 5),
+                   en_muestra=bool(r.en_muestra), planta_actual=_txt(r.planta_actual),
                    activa=bool(r.activa), fecha_alta=pd.to_datetime(r.fecha_alta).date() if not pd.isna(r.fecha_alta) else hoy)
         t.stock = [StockTienda(categoria_id=k, unidades=v)
                    for k, v in _reparto_por_categoria(prendas_dia * 4, cats).items()]   # ~4 días de venta
@@ -213,10 +301,12 @@ def sembrar(log=print):
         raise RuntimeError(f"Faltan {' y '.join(faltan)}: en una base real (PostgreSQL o producción) no se crean usuarios "
                            "con las contraseñas de ejemplo. Defínelas con export en ESTA terminal y repite el comando.")
     rng = random.Random(2026)
+    crear_datos_optimizador(log)       # antes que la red: la semilla usa parámetros y tipos de vehículo
     crear_categorias()
     crear_red(rng)
     crear_flota(rng)
     crear_usuarios()
+    Ajuste.set("red_completada_desde_csv", "1")
     db.session.commit()
     log(f"Base de datos creada: {Tienda.query.count()} tiendas, {Planta.query.count()} plantas, "
         f"{Almacen.query.count()} almacenes, {CamionTroncal.query.count()} camiones troncales, "

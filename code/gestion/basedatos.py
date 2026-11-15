@@ -1,8 +1,10 @@
 """Preparación de la base de datos: migraciones (Alembic vía Flask-Migrate), carga inicial y adopción de bases antiguas.
 
 Una sola base para todo (variable MODARE_DB; por defecto code/gestion.db en SQLite):
-  - tablas de la app de gestión (gestion/modelos.py)
+  - tablas de la app de gestión (gestion/modelos.py), incluidos los datos que lee el optimizador
+    (red, vetos, parametros, tipos_vehiculo, tarifas, distancias)
   - tablas de la librería de rutas (modare/bd.py): pedidos_optimizador, planes, trabajos_optimizacion
+Los CSV de data/ solo se leen para crear la base (semilla) o completar tablas vacías.
 
 Al arrancar la app se llama a preparar_bd():
   - base vacía               -> crea el esquema con las migraciones y la rellena con los datos de ejemplo
@@ -55,10 +57,21 @@ def preparar_bd(log=print):
         upgrade(directory=str(DIR_MIGRACIONES))
     elif "alembic_version" not in tablas:
         raise RuntimeError("La base de datos está vacía y MODARE_AUTO_MIGRAR=0: ejecuta «flask --app app db upgrade».")
+    from .semilla import completar_red_desde_csv, crear_datos_optimizador, sembrar
     if not db.session.query(Categoria.id).first():
-        from .semilla import sembrar
         sembrar(log)
+    # bases creadas antes de que el optimizador leyera de la base: se completan una vez desde data/*.csv
+    crear_datos_optimizador(log)
+    completar_red_desde_csv(log)
     _importar_pedidos_db_antiguo(log)
+
+
+def preparar_desde_cli(log=print):
+    """Para los scripts de línea de comandos (optimizar.py, calcular_distancias.py): migra y, si la base está
+    vacía, la crea desde data/*.csv, igual que al arrancar la app."""
+    app = app_bd()
+    with app.app_context():
+        preparar_bd(log)
 
 
 def borrar_todo():

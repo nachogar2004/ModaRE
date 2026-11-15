@@ -1,4 +1,4 @@
-"""CLI: genera el plan de rutas de una semana.
+"""CLI: genera el plan de rutas de una semana con los datos de la base de datos (los mismos que ve la app).
 
     python optimizar.py                       # semana siguiente, pedidos + estimación
     python optimizar.py --semana 2026-W47 --segundos 60
@@ -8,6 +8,7 @@
 import argparse
 import sys
 
+from gestion.basedatos import preparar_desde_cli
 from modare import config as C
 from modare.planificador import planificar
 
@@ -18,7 +19,8 @@ def main():
     ap.add_argument("--fuente", choices=["mixto", "pedidos", "estimacion"], default="mixto")
     ap.add_argument("--asignacion", choices=["optimo", "actual"], default="optimo")
     ap.add_argument("--plantas-futuras", action="store_true", help="Incluye Asturias y Santiago")
-    ap.add_argument("--segundos", type=int, default=30, help="Tiempo de búsqueda por planta")
+    ap.add_argument("--segundos", type=int, default=C.SEGUNDOS_BUSQUEDA,
+                    help=f"Tiempo de búsqueda por planta (la app usa siempre {C.SEGUNDOS_BUSQUEDA})")
     ap.add_argument("--precio-co2", type=float, default=C.PRECIO_CO2_EUR_T, help="€/t CO2 en el objetivo")
     ap.add_argument("--muestra", action="store_true", help="Solo tiendas con en_muestra=1")
     ap.add_argument("--secuencial", action="store_true", help="Sin procesos en paralelo")
@@ -26,6 +28,7 @@ def main():
                     help="todos: un almacén por provincia, todos abiertos (por defecto); optimo: el modelo decide cuáles abrir")
     a = ap.parse_args()
 
+    preparar_desde_cli()   # los datos salen de la base (MODARE_DB): se migra y, si está vacía, se crea desde data/*.csv
     plan = planificar(a.semana, fuente=a.fuente, asignacion=a.asignacion, plantas_futuras=a.plantas_futuras,
                       segundos=a.segundos, precio_co2=a.precio_co2, solo_muestra=a.muestra,
                       paralelo=not a.secuencial, almacenes=a.almacenes)

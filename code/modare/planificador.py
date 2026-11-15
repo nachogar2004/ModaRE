@@ -26,17 +26,19 @@ from .osrm import añadir_geometrias
 from .simulacion import flota_necesaria, simular_con_reajuste
 from .vrp import PORTAFOLIO, resolver_planta
 
-_D = None  # datos cargados una vez por proceso trabajador
+_D = None  # datos de la optimización en curso, en cada proceso trabajador
 
 
-def _init_trabajador():
+def _init_trabajador(d):
+    """Cada proceso recibe la MISMA foto de la base que el principal: si alguien cambia algo en la app durante
+    el cálculo, no se mezclan datos de antes y de después."""
     global _D
-    _D = cargar_datos()
+    _D = d
 
 
-def _resolver_y_simular(args):
+def _resolver_y_simular(args, d=None):
     escalon, dep, visitas, segundos, precio_co2, estrategia, excluir, tipos, previo = args
-    d = _D if _D is not None else cargar_datos()
+    d = d if d is not None else _D
     # reparto desde un almacén provincial: el conductor vuelve a dormir a casa (rutas de 1 día por defecto)
     dias_max = int(d.P.get("dias_max_ruta_reparto", d.P["dias_max_ruta"])) if escalon == "reparto" else None
     res = resolver_planta(d, dep, visitas, segundos, precio_co2, estrategia, excluir, tipos, dias_max, previo)
@@ -146,17 +148,15 @@ def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: 
             trabajos.append(("reparto", a, vs, _segundos_reparto(segundos, len(vs)), precio_co2, e, x, None,
                              previas.get(a)))
     trabajos.sort(key=lambda t: -t[3])   # los largos primero: reparte mejor la carga entre procesos
-    # MODARE_PROCESOS limita los procesos en paralelo. Con 1 se resuelve todo en ESTE proceso, sin lanzar otros
-    # (cada proceso nuevo vuelve a cargar los datos): es lo que cabe en un servidor pequeño (512 MB).
+    # MODARE_PROCESOS limita los procesos en paralelo. Con 1 se resuelve todo en ESTE proceso, sin lanzar otros:
+    # es lo que cabe en un servidor pequeño (512 MB). Cada proceso recibe la misma foto de los datos (initargs).
     procesos = int(os.environ.get("MODARE_PROCESOS", 0)) or (os.cpu_count() or 4)
     if paralelo and len(trabajos) > 1 and procesos > 1:
         with ProcessPoolExecutor(max_workers=min(len(trabajos), procesos),
-                                 initializer=_init_trabajador) as ex:
+                                 initializer=_init_trabajador, initargs=(d,)) as ex:
             todos = list(ex.map(_resolver_y_simular, trabajos))
     else:
-        global _D
-        _D = d          # reutiliza los datos ya cargados en vez de recargarlos en cada depósito
-        todos = [_resolver_y_simular(t) for t in trabajos]
+        todos = [_resolver_y_simular(t, d) for t in trabajos]
     deps = list(por_planta) + list(por_almacen)
     resultados = [_mejor([r for r in todos if r["planta"] == dep]) for dep in deps]
 

@@ -54,7 +54,6 @@ app.secret_key = _clave or "solo-para-desarrollo-local"
 _ES_HIJO = multiprocessing.parent_process() is not None
 if not _ES_HIJO:
     gestion.init_app(app)
-    DATOS = cargar_datos()
 
 
 def _sem(v: str | None) -> str:
@@ -65,8 +64,10 @@ def _sem(v: str | None) -> str:
     return v
 
 
-def _tiendas():
-    return DATOS.tiendas.sort_values(["provincia", "nombre"])
+def _datos():
+    """La red se lee de la base en cada petición: así se ven los cambios hechos en la app (sin distancias: aquí
+    no hacen falta y son lo más pesado)."""
+    return cargar_datos(distancias=False)
 
 
 @app.route("/central")
@@ -75,9 +76,10 @@ def _tiendas():
 def central():
     semana = _sem(request.args.get("semana"))
     peds = PED.de_semana(semana)
-    est = demanda_estimada(DATOS, PED.num_semana(semana))
+    d = _datos()
+    est = demanda_estimada(d, PED.num_semana(semana))
     filas = []
-    for t in _tiendas().itertuples():
+    for t in d.tiendas.sort_values(["provincia", "nombre"]).itertuples():
         p = peds.get(t.id_tienda)
         filas.append({"id": t.id_tienda, "nombre": t.nombre, "provincia": t.provincia, "cat": t.categoria_tamano,
                       "pedido_cajas": p["cajas"] if p else None, "pedido_kg": p["kg"] if p else None,
@@ -108,7 +110,7 @@ def optimizar():
         flash("Ya hay una optimización en marcha para esta semana.")
         return redirect(url_for("central", semana=semana))
     kw = {"fuente": request.form.get("fuente", "mixto"), "asignacion": request.form.get("asignacion", "optimo"),
-          "segundos": int(request.form.get("segundos", 30)), "precio_co2": float(request.form.get("precio_co2", 0)),
+          "segundos": C.SEGUNDOS_BUSQUEDA, "precio_co2": C.PRECIO_CO2_EUR_T,
           "plantas_futuras": bool(request.form.get("plantas_futuras"))}
     threading.Thread(target=_lanzar, args=(semana, kw), daemon=True).start()
     return redirect(url_for("central", semana=semana))

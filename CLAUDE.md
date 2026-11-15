@@ -24,22 +24,29 @@ las reglas de los conductores (**pausa de 20 min cada 200 km**, jornada y descan
 Flujo de negocio que implementa el prototipo:
 **los dueños de las tiendas piden en la app → al final de la semana la central optimiza → salen las rutas.**
 
-## Datos (`data/`)
+## Datos (`data/` = semilla; la fuente de verdad es la base de datos)
 
-Todos los CSV llevan columnas `etiqueta` (REAL / ESTIMADO / SINTÉTICO) y `fuente`. Respetadlas al presentar.
+**El optimizador lee TODO de la base de datos** (`MODARE_DB`, la misma que la app; `modare/datos.py:cargar_datos`):
+red, vetos, parámetros, tipos de vehículo, tarifas y distancias. Los CSV de `data/` son solo la **semilla**: se
+cargan al crear la base (`gestion/semilla.py`) o para rellenar una tabla vacía; después mandan la base y la app
+(Admin → Tiendas/Plantas/Almacenes, y Admin → Optimizador: Parámetros, Tipos de vehículo, Tarifas). Editar un CSV
+no cambia nada en una base ya creada: hay que rehacerla con `python -m gestion.semilla --reset` (borra lo hecho en
+la app). `gestion.db` no va a git (cada uno tiene la suya; para compartir estado, una base PostgreSQL común).
+
+Todos los CSV llevan columnas `etiqueta` (REAL / ESTIMADO / SINTÉTICO) y `fuente` (en la base se conservan en
+parámetros, vehículos y tarifas). Respetadlas al presentar.
 
 | Fichero | Qué tiene | Notas |
 |---|---|---|
 | `plantas.csv` | 6 plantas (4 activas: MAD, VAL, BCN, BIO; AST y SCQ futuras) | `capacidad_salida_kg_semana`, horario de carga 06–18 h |
-| `almacenes.csv` | 38 almacenes, uno por provincia peninsular con tiendas | **todo SINTÉTICO**: ubicación = **polígono industrial principal** de la provincia (elegido por el equipo en `code/modare/poligonos.py`, coordenadas de OpenStreetMap/Nominatim cacheadas en `poligonos_geocodificados.json`; Zamora fijado a mano, Palencia en el polígono San Blas de Villalobón, junto a la capital), capacidad = 1,5 × demanda media (mín. 1.500 kg/semana), horario 06–20 h L-V, **costes**: `coste_fijo_eur_semana` (superficie según capacidad × alquiler €/m² de la provincia + gastos + gestión: 231–578 €/semana) y `coste_manipulacion_eur_kg` (€/h operario ÷ kg/h: 0,055–0,066 €/kg). Se genera con `code/generar_almacenes.py`; se puede editar a mano |
+| `almacenes.csv` | 38 almacenes, uno por provincia peninsular con tiendas | **todo SINTÉTICO**: ubicación = **polígono industrial principal** de la provincia (elegido por el equipo en `code/modare/poligonos.py`, coordenadas de OpenStreetMap/Nominatim cacheadas en `poligonos_geocodificados.json`; Zamora fijado a mano, Palencia en el polígono San Blas de Villalobón, junto a la capital), capacidad = 1,5 × demanda media (mín. 1.500 kg/semana), horario 06–20 h L-V, **costes**: `coste_fijo_eur_semana` (superficie según capacidad × alquiler €/m² de la provincia + gastos + gestión: 231–578 €/semana) y `coste_manipulacion_eur_kg` (€/h operario ÷ kg/h: 0,055–0,066 €/kg). Se genera con `code/generar_almacenes.py` (herramienta de la semilla). En la base: Admin → Almacenes |
 | `tiendas.csv` | 175 tiendas peninsulares (las 7 de Baleares se eliminaron: el trabajo no incluye islas) | ventas €/año, tamaño, ventana de recepción, `vehiculo_max`, `en_muestra` (53 para pruebas) |
 | `vehiculos.csv` | 5 tipos: FUR 3,5 t, R75, R12, R18, ART 40 t | carga útil kg, volumen m³, palés |
 | `emisiones.csv` | kgCO₂e/km vacío y lleno por tipo (DEFRA 2025) | de aquí sale el **consumo propio** de cada camión |
 | `tarifas.csv` | Operador A (€/km + €/h, ilimitado) y B (€/día + €/km, unidades limitadas) | |
-| `distancias.csv` | matriz completa **por carretera (OSRM)** entre plantas, almacenes y tiendas: km, min de coche y min de camión (×`factor_tiempo_camion`) | 219 puntos, 47.742 pares. Se regenera con `code/calcular_distancias.py` (~30 s); hay que repetirlo si se mueven/añaden almacenes, plantas o tiendas. Si a un par le falta dato se usa línea recta × `factor_rodeo` |
+| `distancias.csv` | matriz completa **por carretera (OSRM)** entre plantas, almacenes y tiendas: km, min de coche y min de camión (×`factor_tiempo_camion`) | 219 puntos, 47.742 pares, en la tabla `distancias`. Al mover un punto en la app se borran sus pares; los que faltan (puntos nuevos o movidos) se calculan con el botón de Admin → Planificación o `calcular_distancias.py` (segundos; `--todos` rehace todo en ~30 s, `--csv` actualiza la semilla). Si a un par le falta dato se usa línea recta × `factor_rodeo` |
 | `geometrias_osrm.json` | caché de trazados por carretera de cada tramo (polyline) para el mapa | se rellena sola al guardar un plan |
-| `vetos_almacen_planta.csv`, `vetos_tienda_almacen.csv` | vetos (`id_almacen,id_planta` / `id_tienda,id_almacen`): de dónde NO quiere recibir cada almacén / tienda; los escribe la app al optimizar | opcionales: sin fichero no hay vetos. Todo almacén puede recibir de cualquier planta y toda tienda de cualquier almacén |
-| `parametros.csv` | todos los supuestos de negocio (kg/palé, frecuencias, jornada, días máx. de ruta, `tipos_troncal`…) | **cambiad aquí los supuestos, no en el código** |
+| `parametros.csv` | todos los supuestos de negocio (kg/palé, frecuencias, jornada, días máx. de ruta, `tipos_troncal`…) | semilla de la tabla `parametros`: **cambiad los supuestos en Admin → Parámetros**, no en el código |
 
 Demanda por defecto (si la tienda no pide): `kg_semana = ventas / precio_medio_eur_kg / semanas_venta_anio`
 (~34 t/semana en total frente a 46 t de capacidad de las 4 plantas activas).
@@ -55,8 +62,8 @@ s.a. Σ_a x[s,a] = 1                        cada tienda la sirve un almacén abi
      z[a] = 1 ∀a  y  Σ_s x[s,a] ≥ 1         (por defecto) los 38 abiertos y cada uno sirve ≥1 tienda si su provincia tiene demanda
      Σ_s kg_s · x[s,a] ≤ capacidad_a        capacidad semanal del almacén
      Σ_p f[a,p] = Σ_s kg_s · x[s,a]         conservación del flujo (f[a,p] = kg que la planta p envía al almacén a)
-     f[a,p] solo existe si el almacén no ha vetado la planta (vetos_almacen_planta.csv)
-     x[s,a] = 0 si la tienda veta el almacén (vetos_tienda_almacen.csv); tiendas que vetan todos -> aviso, sin servir
+     f[a,p] solo existe si el almacén no ha vetado la planta (tabla almacen_plantas_vetadas)
+     x[s,a] = 0 si la tienda veta el almacén (tabla tienda_almacenes_vetados); tiendas que vetan todos -> aviso, sin servir
      Σ_a f[a,p] ≤ capacidad_p               capacidad de salida semanal de la planta (solo activas)
 ```
 **Cualquier almacén puede recibir de cualquier planta, y de varias a la vez** (no hay abastecimiento único): el
@@ -125,17 +132,18 @@ code/
   gestion/basedatos.py  prepara la base al arrancar: migraciones, carga inicial, adopción de bases antiguas
   migrations/         migraciones Alembic (Flask-Migrate) de TODAS las tablas (app + librería)
   .env.example        variables de entorno (producción: MODARE_ENV, MODARE_DB, MODARE_SECRET_KEY…)
-  optimizar.py        CLI
-  generar_almacenes.py  crea data/almacenes.csv (sintético) a partir de tiendas.csv
-  modare/config.py    rutas y supuestos que NO están en parametros.csv (kg/caja, pausas, CO2/L…)
-  modare/datos.py     carga de CSV, demanda estimada, pedidos → visitas, visitas troncales
+  optimizar.py        CLI (usa la base; si está vacía la crea desde data/*.csv)
+  generar_almacenes.py  crea data/almacenes.csv (semilla, sintético) a partir de tiendas.csv
+  modare/config.py    rutas y supuestos que NO están en la tabla parametros (kg/caja, pausas, CO2/L…)
+  modare/datos.py     carga desde la base (foto de una optimización), demanda estimada, pedidos → visitas
   modare/asignacion.py, vrp.py, simulacion.py   (ver arriba)
-  modare/bd.py        base de datos común (MODARE_DB): tablas pedidos_optimizador, planes, trabajos_optimizacion
+  modare/bd.py        base de datos común (MODARE_DB): lee las tablas de la app; escribe pedidos_optimizador, planes, trabajos_optimizacion
   modare/pedidos.py   pedido semanal por (semana ISO, tienda) -> tabla pedidos_optimizador
   modare/planificador.py  orquesta todo y escribe salidas/<semana>/
   modare/visualizar.py    genera salidas/<semana>/mapa.html
   modare/osrm.py      cliente OSRM: matriz de distancias y trazados de rutas (1 petición/s, con caché)
-  calcular_distancias.py  regenera data/distancias.csv por carretera
+  modare/distancias.py    distancias por carretera en la tabla distancias: qué puntos faltan, cálculo parcial o total
+  calcular_distancias.py  CLI de lo anterior (por defecto solo los puntos nuevos o movidos)
   templates/          HTML de la app (Leaflet para el mapa); templates/gestion/ = pantallas de la app de gestión
   static/             remode.css (diseño vaquero del logo: tokens claro/oscuro, costuras, componentes) y remode.js (pestañas, filtros, totales en vivo, avisos)
   static/marca/       logo RMS sin fondo (webp) e icono camiseta-R (png). Original y script que los genera en docs/marca/
@@ -155,7 +163,7 @@ code/
 - `paradas.csv`: una fila por parada. `almacenes.csv`: uso de cada almacén. `plan.json`: todo lo anterior + KPIs.
 - Regenerar el mapa sin optimizar: `.venv\Scripts\python -m modare.visualizar 2026-W47`. También reintenta los tramos que
   no se pudieron dibujar. Los trazados vienen de la caché (`data/geometrias_osrm.json`, en git) o del servidor público
-  de OSRM; si no hay conexión se dibujan en línea recta (**el plan y los costes no cambian**: usan `distancias.csv`).
+  de OSRM; si no hay conexión se dibujan en línea recta (**el plan y los costes no cambian**: usan la tabla `distancias`).
   Como cada ordenador encuentra rutas algo distintas, los tramos nuevos se piden a OSRM. Si falla por certificados
   (`CERTIFICATE_VERIFY_FAILED`, típico del Python de python.org en Mac): instalar `requirements.txt` (incluye certifi)
   o ejecutar `Install Certificates.command`; en redes con inspección HTTPS, probar otra red o sin VPN.
@@ -164,8 +172,8 @@ code/
 ```
 python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
-.venv\Scripts\python generar_almacenes.py                                         # solo si falta data/almacenes.csv
-.venv\Scripts\python calcular_distancias.py                                       # tras cambiar almacenes/plantas/tiendas
+.venv\Scripts\python generar_almacenes.py                                         # solo para rehacer la semilla data/almacenes.csv
+.venv\Scripts\python calcular_distancias.py                                       # distancias de puntos nuevos/movidos (o botón en la app)
 .venv\Scripts\python optimizar.py --muestra --fuente estimacion --segundos 10   # prueba rápida (~15 s)
 .venv\Scripts\python optimizar.py --semana 2026-W47 --segundos 30               # red completa (~60 s)
 .venv\Scripts\python app.py                                                      # http://127.0.0.1:5000
@@ -207,14 +215,15 @@ físicos del reparto se cuentan por almacén (cada almacén necesita al menos un
 ## App de gestión «ReMode Studio» (`code/gestion/`, BD única en `MODARE_DB`; en desarrollo `code/gestion.db`)
 
 Aplicación web con login por roles sobre la misma app Flask. La BD (SQLite, SQLAlchemy) se crea y se rellena
-sola desde `data/*.csv` la primera vez que se arranca `app.py` (`gestion/semilla.py`).
+sola desde `data/*.csv` la primera vez que se arranca `app.py` (`gestion/semilla.py`); desde entonces es la única
+fuente de datos, también del optimizador: lo que se cambia en la app entra en la siguiente optimización.
 
 | Rol | Usuario | Qué ve y hace |
 |---|---|---|
 | **Tienda** | `td-001`… | Stock en **prendas** por segmento (Mujer/Hombre/Niños) × tipo (arriba, abajo, abrigos, zapatos, bolsos) con días de cobertura; registra **ventas**; **poner/quitar prendas** (ajuste de inventario); configura su **pedido automático** (diario L-V / semanal / mensual, día, días de seguridad); hace **pedidos adicionales**; confirma la recepción |
 | **Planta** | `pl-mad`… | Stock en prendas por categoría y **stock máximo**; entradas de clasificación; **expide** las reposiciones a almacenes (descuenta stock); sus camiones troncales y rutas |
 | **Almacén** | `al-madrid`… | Stock en **cajas mixtas** frente a su **máximo** (alerta si lo supera, también con lo previsto); **recibe** reposiciones; **carga** los pedidos de tienda en el camión de reparto |
-| **Admin** | `admin` | Todo: alta/baja/edición de usuarios, tiendas, plantas, almacenes, camiones troncales, camiones de reparto y categorías; ve pedidos, movimientos de stock y alertas; planificación semanal |
+| **Admin** | `admin` | Todo: alta/baja/edición de usuarios, tiendas, plantas, almacenes (incl. sus costes), camiones troncales, camiones de reparto y categorías; edición de los **datos del optimizador** (parámetros, tipos de vehículo y tarifas: sin altas ni bajas); ve pedidos, movimientos de stock y alertas; planificación semanal y cálculo de distancias de puntos nuevos o movidos |
 
 **Datos**: una sola base de datos (SQLAlchemy; SQLite en desarrollo, PostgreSQL en producción) para la app y la
 librería: el plan de cada semana se guarda en la tabla `planes` (salidas/ es solo copia) y el estado de las
@@ -223,7 +232,7 @@ no tocar el esquema a mano. Despliegue y variables: §12 de la guía.
 
 Guía de uso completa: [docs/guia_app.md](docs/guia_app.md). No hay asociaciones fijas tienda→almacén ni almacén→planta: el optimizador decide cada semana.
 Solo hay **vetos** (tablas `almacen_plantas_vetadas` y `tienda_almacenes_vetados`), que deciden la tienda y el almacén en su panel;
-se exportan a `data/vetos_*.csv` y la asignación los respeta.
+el optimizador los lee de la base y la asignación los respeta.
 
 Contraseñas iniciales: `admin`/`admin` y `modare2026` para el resto (variables `MODARE_PASSWORD_ADMIN`,
 `MODARE_PASSWORD_INICIAL`; `MODARE_SECRET_KEY` para la sesión). Al dar de alta una tienda/planta/almacén se crea
@@ -232,7 +241,9 @@ su usuario con contraseña aleatoria. Borrar algo con historial lo **da de baja*
 **Tablas** (`gestion/modelos.py`): `usuarios`, `categorias`, `plantas` + `stock_planta`, `almacenes`, `tiendas` +
 `stock_tienda`, `ventas`, `pedidos` + `lineas_pedido`, `camiones_troncal` (planta→almacén), `camiones_reparto`
 (almacén→tienda), `viajes` (rutas del plan con su camión), `reposiciones` + `lineas_reposicion` (envío troncal),
-`movimientos` (auditoría de stock), `ajustes`.
+`movimientos` (auditoría de stock), `ajustes`; datos del optimizador: `parametros`, `tipos_vehiculo` (con emisiones),
+`tarifas`, `distancias` (además de la red y los vetos). La librería las lee por nombre en `modare/datos.py`: si se
+renombra una columna, adaptarla allí.
 
 **Pedido automático** (`gestion/logistica.py`): en el día que toca, por categoría,
 `venta media diaria (4 semanas) × (días del periodo + días de seguridad) − stock − pedido en camino`;
@@ -240,8 +251,8 @@ no se genera si pesa menos de media caja. Se generan solos con la primera petici
 Lo pedido de lunes a viernes se entrega la semana siguiente (cierre el viernes).
 
 **Ciclo semanal** (Admin → Planificación): 1) *cerrar semana* → pedidos `confirmado` y suma por tienda en
-`modare.pedidos` (lo que lee el optimizador); 2) *optimizar* → `gestion/optimizador.py` exporta tiendas/plantas/almacenes
-a `data/*.csv`, ejecuta `planificar(fuente="pedidos")` e **importa `plan.json`**: crea los viajes, asigna a cada ruta
+`modare.pedidos` (lo que lee el optimizador); 2) *optimizar* → `gestion/optimizador.py` ejecuta `planificar(fuente="pedidos")`
+(que lee la red y los parámetros de la base en ese momento) e **importa el plan**: crea los viajes, asigna a cada ruta
 un camión libre de su base (mismo tipo o el más pequeño con capacidad; editable a mano) y crea una reposición por almacén
 con la mezcla de prendas de sus pedidos; 3) planta expide → almacén recibe (+cajas) → almacén carga (−cajas) →
 tienda recibe (+prendas). **`gestion/optimizador.py` es el único módulo que conoce la librería de rutas**: si cambia, solo se adapta ese.
@@ -254,7 +265,7 @@ Pendiente: el plan troncal y el reparto se ejecutan la misma semana en la app (e
 
 ## Supuestos y limitaciones (decidlos/validadlos con la ONG)
 - **Almacenes inventados** (qué polígono, capacidad, horario): ver `almacenes.csv`, `modare/poligonos.py` y `generar_almacenes.py`.
-  Tras cambiar un almacén: `generar_almacenes.py` → `calcular_distancias.py` → `optimizar.py`.
+  Para cambiar un almacén: editarlo en la app → «Calcular distancias» en Planificación → optimizar.
 - **Costes de almacén inventados** (alquiler por provincia sin fuente verificada, gestión 100 €/semana, 21 €/h
   operario, 350 kg/h). Un almacén cerrado cuesta 0 (se supone que se puede dejar de alquilar).
 - La capacidad de cada almacén es fija (1,5 × demanda de su provincia): al cerrar almacenes, los vecinos solo absorben

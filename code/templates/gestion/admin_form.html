@@ -64,11 +64,11 @@
     {% if alta and ent in ('tiendas', 'plantas', 'almacenes') %}
     <span class="small">Se creará también su usuario de acceso con una contraseña aleatoria (se muestra una sola vez).</span>
     {% endif %}
-    {% if not alta %}<span class="right"></span>
+    {% if not alta and not e.solo_edicion %}<span class="right"></span>
     <button type="submit" form="borrar" class="danger">{{ icono('trash') }}Eliminar</button>{% endif %}
   </div>
 </form>
-{% if not alta %}
+{% if not alta and not e.solo_edicion %}
 <form id="borrar" method="post" action="{{ url_for('admin.borrar', ent=ent, oid=oid) }}"
       data-confirm="¿Eliminar {{ e.singular }} {{ obj.id }}? Si tiene historial se dará de baja y se conservará.">{{ csrf() }}</form>
 {% endif %}
