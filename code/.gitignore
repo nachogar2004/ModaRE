@@ -3,3 +3,5 @@ __pycache__/
 pedidos.db
 salidas/
 gestion.db
+.env
+pedidos.db.migrado

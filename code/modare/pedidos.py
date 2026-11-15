@@ -1,29 +1,16 @@
-"""Pedidos de las tiendas (lo que rellenan los dueños en la app). SQLite, un pedido por tienda y semana."""
+"""Pedido semanal de cada tienda (kg y cajas): la entrada del optimizador.
+
+Vive en la base de datos común (tabla pedidos_optimizador, ver modare.bd). La app de gestión lo rellena al
+cerrar la semana sumando los pedidos automáticos y adicionales de cada tienda.
+"""
 from __future__ import annotations
 
 import datetime as dt
-import sqlite3
+
+import sqlalchemy as sa
 
 from . import config as C
-
-ESQUEMA = """
-CREATE TABLE IF NOT EXISTS pedidos (
-    semana      TEXT NOT NULL,          -- '2026-W47'
-    id_tienda   TEXT NOT NULL,
-    cajas       INTEGER NOT NULL,
-    kg          REAL NOT NULL,
-    comentario  TEXT,
-    actualizado TEXT NOT NULL,
-    PRIMARY KEY (semana, id_tienda)
-);
-"""
-
-
-def _con():
-    con = sqlite3.connect(C.DB_PATH)
-    con.row_factory = sqlite3.Row
-    con.execute(ESQUEMA)
-    return con
+from .bd import _upsert, ahora, engine, pedidos_optimizador as T
 
 
 def semana_actual() -> str:
@@ -38,20 +25,22 @@ def num_semana(semana: str) -> int:
 
 def guardar(semana: str, id_tienda: str, cajas: int, kg: float | None = None, comentario: str = ""):
     kg = float(kg) if kg else cajas * C.KG_POR_CAJA
-    with _con() as con:
-        con.execute(
-            "INSERT INTO pedidos VALUES (?,?,?,?,?,?) ON CONFLICT(semana,id_tienda) DO UPDATE SET "
-            "cajas=excluded.cajas, kg=excluded.kg, comentario=excluded.comentario, actualizado=excluded.actualizado",
-            (semana, id_tienda, int(cajas), kg, comentario, dt.datetime.now().isoformat(timespec="seconds")),
-        )
+    with engine().begin() as con:
+        _upsert(con, T, {"semana": semana, "id_tienda": id_tienda, "cajas": int(cajas), "kg": kg,
+                         "comentario": comentario, "actualizado": ahora()}, ["semana", "id_tienda"])
 
 
 def borrar(semana: str, id_tienda: str):
-    with _con() as con:
-        con.execute("DELETE FROM pedidos WHERE semana=? AND id_tienda=?", (semana, id_tienda))
+    with engine().begin() as con:
+        con.execute(sa.delete(T).where(T.c.semana == semana, T.c.id_tienda == id_tienda))
+
+
+def borrar_semana(semana: str):
+    with engine().begin() as con:
+        con.execute(sa.delete(T).where(T.c.semana == semana))
 
 
 def de_semana(semana: str) -> dict[str, dict]:
-    with _con() as con:
-        rows = con.execute("SELECT * FROM pedidos WHERE semana=?", (semana,)).fetchall()
-    return {r["id_tienda"]: dict(r) for r in rows}
+    with engine().connect() as con:
+        rows = con.execute(sa.select(T).where(T.c.semana == semana)).mappings().all()
+    return {r["id_tienda"]: {**r, "actualizado": r["actualizado"].isoformat(timespec="seconds")} for r in rows}

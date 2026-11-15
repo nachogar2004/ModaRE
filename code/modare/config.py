@@ -8,7 +8,7 @@ from pathlib import Path
 CODE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = CODE_DIR.parent / "data"
 SALIDAS_DIR = CODE_DIR / "salidas"
-DB_PATH = CODE_DIR / "pedidos.db"
+DB_PATH_ANTIGUO = CODE_DIR / "pedidos.db"   # antes los pedidos iban aquí; ahora a la BD común (modare.bd)
 
 # --- Unidades de carga -------------------------------------------------------
 # La ropa se mide en kg y se mueve en cajas. kg_por_palet (250) viene de parametros.csv.

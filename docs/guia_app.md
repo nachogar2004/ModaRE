@@ -15,6 +15,7 @@ con el optimizador del repo (`code/modare`).
 - [9. Datos y tablas](#9-datos-y-tablas)
 - [10. Datos inventados (sintéticos)](#10-datos-inventados-sintéticos)
 - [11. Problemas frecuentes](#11-problemas-frecuentes)
+- [12. Uso real: base de datos y despliegue](#12-uso-real-base-de-datos-y-despliegue)
 
 ---
 
@@ -30,9 +31,10 @@ Desde la carpeta `code/`:
 
 Abrir `http://127.0.0.1:5000` (o el puerto indicado; en macOS el 5000 lo ocupa AirPlay).
 
-La primera vez la app crea **`code/gestion.db`** (SQLite) a partir de los CSV de `data/`: 182 tiendas,
-6 plantas (4 activas), 38 almacenes, una flota inicial y un usuario por cada tienda, planta y almacén.
-Para empezar de cero: `python -m gestion.semilla --reset`.
+En desarrollo, la primera vez la app crea **`code/gestion.db`** (SQLite) con las migraciones y la rellena a partir
+de los CSV de `data/`: 182 tiendas, 6 plantas (4 activas), 38 almacenes, una flota inicial y un usuario por cada
+tienda, planta y almacén. Para empezar de cero: `python -m gestion.semilla --reset` (¡borra todo!).
+Para uso real (PostgreSQL, servidor, copias) ver [§12](#12-uso-real-base-de-datos-y-despliegue).
 
 **Accesos iniciales** (cámbialos en *Mi cuenta*):
 
@@ -41,8 +43,7 @@ Para empezar de cero: `python -m gestion.semilla --reset`.
 | `admin` | `admin` |
 | tiendas `td-001` … `td-182`, plantas `pl-mad`, `pl-val`…, almacenes `al-madrid`, `al-sevilla`… | `modare2026` |
 
-Variables de entorno opcionales: `MODARE_PASSWORD_ADMIN`, `MODARE_PASSWORD_INICIAL` (solo al crear la BD),
-`MODARE_SECRET_KEY` (clave de las sesiones: **obligatorio cambiarla si se publica la app**), `MODARE_DB`, `PORT`.
+Todas las variables de entorno están explicadas en [`code/.env.example`](../code/.env.example).
 
 ---
 
@@ -247,10 +248,11 @@ El optimizador es el paquete `code/modare`. La app habla con él **solo a travé
 
 | Dirección | Qué | Dónde |
 |---|---|---|
-| App → librería | pedidos de la semana, en kg y cajas por tienda | tabla `pedidos` de `code/pedidos.db` |
+| App → librería | pedidos de la semana, en kg y cajas por tienda | tabla `pedidos_optimizador` (misma base de datos) |
 | App → librería | tiendas, plantas, almacenes (altas, bajas, cambios) | `data/tiendas.csv`, `plantas.csv`, `almacenes.csv` |
 | App → librería | vetos de almacenes y tiendas | `data/vetos_almacen_planta.csv`, `data/vetos_tienda_almacen.csv` |
-| Librería → app | rutas, paradas, almacén y planta asignados, KPIs | `code/salidas/<semana>/plan.json` (+ `rutas.csv`, `paradas.csv`, `mapa.html`) |
+| Librería → app | rutas, paradas, almacén y planta asignados, KPIs | tabla `planes` (y copia en `code/salidas/<semana>/`: `plan.json`, CSV, `mapa.html`) |
+| Ambas | estado de cada optimización (calculando / ok / error) | tabla `trabajos_optimizacion` |
 
 - La exportación solo reescribe los valores que han cambiado, para que el `git diff` de `data/` sea legible.
 - Si se añade o se mueve una tienda, planta o almacén, la librería calcula sus distancias en línea recta × 1,26
@@ -262,7 +264,9 @@ El optimizador es el paquete `code/modare`. La app habla con él **solo a travé
 
 ## 9. Datos y tablas
 
-Base de datos `code/gestion.db` (SQLite; no se sube a git). Modelos en `code/gestion/modelos.py`.
+**Una sola base de datos** para la app y la librería de rutas (variable `MODARE_DB`; en desarrollo `code/gestion.db`,
+que no se sube a git). Modelos en `code/gestion/modelos.py` y `code/modare/bd.py`; el esquema lo crean y actualizan
+las migraciones de `code/migrations/`.
 
 | Tabla | Contenido |
 |---|---|
@@ -279,10 +283,15 @@ Base de datos `code/gestion.db` (SQLite; no se sube a git). Modelos en `code/ges
 | `viajes` | rutas del plan con horario, km, coste, CO₂ y camión asignado |
 | `reposiciones`, `lineas_reposicion` | envíos planta → almacén y su mezcla de prendas |
 | `movimientos` | auditoría de cada cambio de stock |
-| `ajustes` | estado interno (semanas cerradas, último día de pedidos automáticos, migraciones) |
+| `ajustes` | estado interno (semanas cerradas, último día de pedidos automáticos) |
+| `pedidos_optimizador` | (librería) pedido semanal de cada tienda en kg y cajas: la entrada del optimizador |
+| `planes` | (librería) el plan de cada semana en JSON |
+| `trabajos_optimizacion` | (librería) estado de cada optimización; una «calculando» de más de 30 min se da por interrumpida |
+| `alembic_version` | versión del esquema (migraciones) |
 
 Código: `gestion/vistas_*.py` (pantallas), `gestion/logistica.py` (reglas de negocio),
-`gestion/optimizador.py` (puente con la librería), `gestion/semilla.py` (carga inicial y migraciones),
+`gestion/optimizador.py` (puente con la librería), `gestion/semilla.py` (carga inicial), `gestion/basedatos.py`
+(preparación de la base y migraciones), `modare/bd.py` (tablas de la librería),
 `templates/gestion/` (HTML), `static/remode.css` y `static/remode.js` (diseño e interacción, sin dependencias).
 
 ---
@@ -318,7 +327,76 @@ cambiar desde la app y conviene sustituirlo por datos reales:
 
 - La librería supone que lo repuesto en la semana W se reparte en W+1; la app hoy hace ambas cosas en la misma semana.
 - Un pedido que el optimizador reparte en varias entregas se asocia a la primera ruta.
-- No hay límite de intentos de inicio de sesión ni HTTPS propio: para publicarla, ponerla detrás de un servidor
-  con HTTPS y cambiar `MODARE_SECRET_KEY` y las contraseñas iniciales.
-- El estado de una optimización en curso se guarda en memoria: si se reinicia el servidor mientras calcula,
-  hay que relanzarla.
+- No hay límite de intentos de inicio de sesión: conviene ponerlo en el proxy (nginx, Cloudflare…).
+- La optimización corre en un hilo del proceso web: si el servidor se reinicia mientras calcula, queda marcada
+  como interrumpida y hay que relanzarla. Para muchos usuarios a la vez, moverla a una cola de tareas (RQ, Celery).
+- Los CSV de `data/` y `code/salidas/` se escriben en el disco del servidor; la app no depende de ellos para
+  funcionar (los planes están en la base), pero el mapa HTML de `salidas/` se pierde si el disco es efímero.
+
+---
+
+## 12. Uso real: base de datos y despliegue
+
+### Dónde están los datos
+
+| Qué | Dónde |
+|---|---|
+| Todo lo de la app y del optimizador (usuarios, stock, pedidos, rutas, planes, estado de las optimizaciones) | **la base de datos** de `MODARE_DB` |
+| Datos de partida y parámetros del modelo (vehículos, tarifas, distancias, parámetros) | `data/*.csv` en git |
+| Entrada que la app genera para el optimizador (tiendas, plantas, almacenes, vetos) | `data/*.csv`, se reescriben al optimizar |
+| Copias legibles de cada plan (mapa, CSV) | `code/salidas/<semana>/` (prescindibles) |
+
+La fuente de verdad es la base de datos. Nunca se sube a git.
+
+### Base de datos recomendada: PostgreSQL
+
+Un PostgreSQL gestionado **alojado en la UE** (hay datos personales: nombres y emails), con copias de seguridad
+automáticas: Supabase, Neon, Azure Database for PostgreSQL, AWS RDS… Basta con crear una base vacía y poner su
+cadena de conexión en `MODARE_DB` (`postgresql://usuario:clave@host:5432/base`; también vale `postgres://`).
+La app crea las tablas sola en el primer arranque.
+
+### Variables de entorno (ver `code/.env.example`)
+
+| Variable | Producción | Para qué |
+|---|---|---|
+| `MODARE_ENV=produccion` | sí | activa las comprobaciones y las cookies seguras (solo HTTPS) |
+| `MODARE_DB` | sí | cadena de conexión de la base de datos |
+| `MODARE_SECRET_KEY` | sí, ≥ 32 caracteres | firma las sesiones. `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
+| `MODARE_PASSWORD_ADMIN`, `MODARE_PASSWORD_INICIAL` | sí, solo en la primera carga | contraseña del admin y contraseña inicial del resto de usuarios |
+| `MODARE_AUTO_MIGRAR` | `0` si hay varios procesos | `1` = migra al arrancar |
+| `MODARE_PROXY` | `1` (defecto) | la app está detrás de un proxy HTTPS |
+
+Sin `MODARE_SECRET_KEY` o sin `MODARE_DB`, en producción la app **se niega a arrancar**.
+
+### Arrancar en un servidor
+
+```bash
+cd code
+pip install -r requirements.txt
+export MODARE_ENV=produccion MODARE_DB=postgresql://… MODARE_SECRET_KEY=… MODARE_AUTO_MIGRAR=0
+flask --app app db upgrade                      # aplica las migraciones (en cada despliegue)
+gunicorn -w 2 -b 0.0.0.0:8000 --timeout 120 app:app     # Windows: waitress-serve --port 8000 app:app
+```
+
+Delante, un proxy con HTTPS (nginx, Caddy o el que dé el proveedor). La optimización tarda 1–2 min y corre en
+segundo plano, así que el `--timeout` solo afecta a las peticiones normales.
+
+### Cambiar el esquema (añadir un campo, una tabla…)
+
+1. Cambia el modelo en `gestion/modelos.py` (o `modare/bd.py`).
+2. `flask --app app db migrate -m "qué cambia"` → genera un fichero en `code/migrations/versions/`. **Revísalo**.
+3. `flask --app app db upgrade` en tu base; súbelo a git; en el servidor se aplica al desplegar.
+
+Nunca se cambia el esquema a mano en producción. En SQLite las migraciones desactivan las claves foráneas mientras
+recrean tablas (si no, se borrarían en cascada filas relacionadas).
+
+### Copias de seguridad
+
+- PostgreSQL gestionado: activa las copias automáticas y la restauración a un punto en el tiempo.
+- Copia manual: `pg_dump "$MODARE_DB" > copia_$(date +%F).sql` · SQLite: copia el fichero `gestion.db` con la app parada.
+
+### Bases creadas antes de las migraciones
+
+Una `gestion.db` antigua se adopta sola en el primer arranque: se completa, se quita la columna del antiguo
+«almacén habitual», se marca con la versión inicial y a partir de ahí mandan las migraciones. Si existe el
+antiguo `code/pedidos.db`, sus pedidos se copian a la base común y el fichero queda como `pedidos.db.migrado`.

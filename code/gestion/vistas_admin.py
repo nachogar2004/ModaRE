@@ -10,9 +10,10 @@ from typing import Any, Callable
 from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 
 from modare import config as C
+from modare import bd as BD
 from modare.planificador import cargar_plan
 
 from . import logistica as L
@@ -340,6 +341,10 @@ def _aplicar(e: Entidad, obj, form, alta: bool):
             continue
         if c.requerido and v is None:
             raise ValueError(f"«{c.etiqueta}» es obligatorio.")
+        col = e.modelo.__table__.c.get(c.nombre)
+        largo = getattr(getattr(col, "type", None), "length", None)
+        if isinstance(v, str) and largo and len(v) > largo:   # PostgreSQL lo rechazaría (SQLite no avisa)
+            raise ValueError(f"«{c.etiqueta}» admite como máximo {largo} caracteres (tiene {len(v)}).")
         setattr(obj, c.nombre, v)
 
 
@@ -381,9 +386,11 @@ def editar(ent, oid=None):
             db.session.commit()
             flash(f"Guardado: {e.singular} {obj.id}.")
             return redirect(url_for("admin.lista", ent=ent))
-        except (ValueError, IntegrityError) as ex:
+        except (ValueError, IntegrityError, DataError) as ex:
             db.session.rollback()
-            msg = "Ya existe un registro con ese código o matrícula." if isinstance(ex, IntegrityError) else str(ex)
+            msg = ("Ya existe un registro con ese código o matrícula." if isinstance(ex, IntegrityError)
+                   else "Algún dato no es válido para la base de datos (demasiado largo o con formato incorrecto)."
+                   if isinstance(ex, DataError) else str(ex))
             flash(msg, "error")
             if not alta:
                 obj = _obtener(e, oid)
@@ -551,7 +558,7 @@ def planificacion():
         sem_actual=L.semana_entrega_para(dt.date.today()),
         kg=round(sum(p.kg for p in peds), 1), cajas=sum(p.cajas for p in peds),
         tiendas=len({p.tienda_id for p in peds}), cerrada=L.semana_cerrada(semana), viajes=viajes, reps=reps,
-        plan=cargar_plan(semana), trabajo=OPT.TRABAJOS.get(semana), flota_t=flota_t, flota_r=flota_r)
+        plan=cargar_plan(semana), trabajo=BD.estado_trabajo(semana), flota_t=flota_t, flota_r=flota_r)
 
 
 @bp.post("/planificacion/cerrar")
@@ -589,7 +596,7 @@ def optimizar():
 
 @bp.get("/planificacion/estado")
 def estado():
-    return jsonify(OPT.TRABAJOS.get(_sem(request.args.get("semana")), {}))
+    return jsonify(BD.estado_trabajo(_sem(request.args.get("semana"))))
 
 
 @bp.post("/planificacion/importar")

@@ -205,22 +205,18 @@ def nombrar_rutas(plan: dict):
 
 
 def guardar(plan: dict):
+    """Guarda el plan en la base de datos (lo que lee la app) y, además, los ficheros de salidas/<semana>/
+    (mapa.html y CSV para abrir a mano; en un servidor con disco efímero pueden perderse sin problema)."""
+    from .bd import guardar_plan
     from .visualizar import escribir_mapa
     nombrar_rutas(plan)
+    guardar_plan(plan)
     out = C.SALIDAS_DIR / plan["resumen"]["semana"]
     out.mkdir(parents=True, exist_ok=True)
     (out / "plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
     # utf-8-sig para que Excel muestre bien las tildes
     with open(out / "paradas.csv", "w", newline="", encoding="utf-8-sig") as f:
-        w = csv.writer(f)
-        w.writerow(["ruta", "escalon", "origen", "planta", "tipo", "operador", "salida", "orden", "visita",
-                    "destino", "nombre", "municipio", "kg", "cajas", "llegada", "inicio_descarga", "ventana",
-                    "a_tiempo", "id_solver"])
-        for r in plan["rutas"]:
-            for i, p in enumerate(r["paradas"], 1):
-                w.writerow([r["nombre"], r.get("escalon"), r.get("origen"), r["planta"], r["tipo"], r["operador"],
-                            r["salida"], i, p["visita"], p["tienda"], p["nombre"], p["municipio"], p["kg"],
-                            p["cajas"], p["llegada"], p["inicio_descarga"], p["ventana"], p["a_tiempo"], r["id"]])
+        csv.writer(f).writerows(filas_paradas(plan))
     with open(out / "rutas.csv", "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         cols = ["tipo", "operador", "salida", "vuelta", "dias_ruta", "noches", "n_paradas", "kg", "cajas",
@@ -240,6 +236,24 @@ def guardar(plan: dict):
     escribir_mapa(plan, out)
 
 
+def filas_paradas(plan: dict) -> list[list]:
+    """Cabecera + una fila por parada (paradas.csv). La app lo genera desde el plan guardado en la BD."""
+    filas = [["ruta", "escalon", "origen", "planta", "tipo", "operador", "salida", "orden", "visita",
+              "destino", "nombre", "municipio", "kg", "cajas", "llegada", "inicio_descarga", "ventana",
+              "a_tiempo", "id_solver"]]
+    for r in plan["rutas"]:
+        for i, p in enumerate(r["paradas"], 1):
+            filas.append([r["nombre"], r.get("escalon"), r.get("origen"), r["planta"], r["tipo"], r["operador"],
+                          r["salida"], i, p["visita"], p["tienda"], p["nombre"], p["municipio"], p["kg"],
+                          p["cajas"], p["llegada"], p["inicio_descarga"], p["ventana"], p["a_tiempo"], r["id"]])
+    return filas
+
+
 def cargar_plan(semana: str) -> dict | None:
-    f = C.SALIDAS_DIR / semana / "plan.json"
-    return json.loads(f.read_text(encoding="utf-8")) if f.exists() else None
+    """El plan se guarda en la base de datos (tabla planes); si no está (planes antiguos), se lee el fichero."""
+    from .bd import cargar_plan as de_bd
+    plan = de_bd(semana)
+    if plan is None:
+        f = C.SALIDAS_DIR / semana / "plan.json"
+        plan = json.loads(f.read_text(encoding="utf-8")) if f.exists() else None
+    return plan

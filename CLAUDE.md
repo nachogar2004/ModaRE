@@ -107,12 +107,16 @@ Los **camiones físicos** = máximo de rutas solapadas por (depósito, tarifa): 
 code/
   app.py              Flask: monta la app de gestión (gestion/) y /central (optimizador avanzado + mapa, solo admin)
   gestion/            app de gestión del transporte con usuarios y roles (ver «App de gestión» más abajo)
+  gestion/basedatos.py  prepara la base al arrancar: migraciones, carga inicial, adopción de bases antiguas
+  migrations/         migraciones Alembic (Flask-Migrate) de TODAS las tablas (app + librería)
+  .env.example        variables de entorno (producción: MODARE_ENV, MODARE_DB, MODARE_SECRET_KEY…)
   optimizar.py        CLI
   generar_almacenes.py  crea data/almacenes.csv (sintético) a partir de tiendas.csv
   modare/config.py    rutas y supuestos que NO están en parametros.csv (kg/caja, pausas, CO2/L…)
   modare/datos.py     carga de CSV, demanda estimada, pedidos → visitas, visitas troncales
   modare/asignacion.py, vrp.py, simulacion.py   (ver arriba)
-  modare/pedidos.py   SQLite (code/pedidos.db), un pedido por (semana ISO, tienda)
+  modare/bd.py        base de datos común (MODARE_DB): tablas pedidos_optimizador, planes, trabajos_optimizacion
+  modare/pedidos.py   pedido semanal por (semana ISO, tienda) -> tabla pedidos_optimizador
   modare/planificador.py  orquesta todo y escribe salidas/<semana>/
   modare/visualizar.py    genera salidas/<semana>/mapa.html
   modare/osrm.py      cliente OSRM: matriz de distancias y trazados de rutas (1 petición/s, con caché)
@@ -171,7 +175,7 @@ La primera ejecución tarda ~1 min más porque pide a OSRM el trazado de cada ru
 escalones **no incluye operar los almacenes** (manipulación, alquiler, personal), que hoy vale 0; y los camiones
 físicos del reparto se cuentan por almacén (cada almacén necesita al menos uno).
 
-## App de gestión «ReMode Studio» (`code/gestion/`, BD `code/gestion.db`)
+## App de gestión «ReMode Studio» (`code/gestion/`, BD única en `MODARE_DB`; en desarrollo `code/gestion.db`)
 
 Aplicación web con login por roles sobre la misma app Flask. La BD (SQLite, SQLAlchemy) se crea y se rellena
 sola desde `data/*.csv` la primera vez que se arranca `app.py` (`gestion/semilla.py`).
@@ -182,6 +186,11 @@ sola desde `data/*.csv` la primera vez que se arranca `app.py` (`gestion/semilla
 | **Planta** | `pl-mad`… | Stock en prendas por categoría y **stock máximo**; entradas de clasificación; **expide** las reposiciones a almacenes (descuenta stock); sus camiones troncales y rutas |
 | **Almacén** | `al-madrid`… | Stock en **cajas mixtas** frente a su **máximo** (alerta si lo supera, también con lo previsto); **recibe** reposiciones; **carga** los pedidos de tienda en el camión de reparto |
 | **Admin** | `admin` | Todo: alta/baja/edición de usuarios, tiendas, plantas, almacenes, camiones troncales, camiones de reparto y categorías; ve pedidos, movimientos de stock y alertas; planificación semanal |
+
+**Datos**: una sola base de datos (SQLAlchemy; SQLite en desarrollo, PostgreSQL en producción) para la app y la
+librería: el plan de cada semana se guarda en la tabla `planes` (salidas/ es solo copia) y el estado de las
+optimizaciones en `trabajos_optimizacion`. Esquema con migraciones (`flask --app app db migrate/upgrade`);
+no tocar el esquema a mano. Despliegue y variables: §12 de la guía.
 
 Guía de uso completa: [docs/guia_app.md](docs/guia_app.md). No hay asociaciones fijas tienda→almacén ni almacén→planta: el optimizador decide cada semana.
 Solo hay **vetos** (tablas `almacen_plantas_vetadas` y `tienda_almacenes_vetados`), que deciden la tienda y el almacén en su panel;

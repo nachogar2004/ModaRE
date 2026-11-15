@@ -1,7 +1,7 @@
 """Carga inicial de la base de datos de gestión a partir de los CSV de data/.
 
-    .venv/bin/python -m gestion.semilla            # crea gestion.db si está vacía
-    .venv/bin/python -m gestion.semilla --reset    # la borra y la vuelve a crear
+    .venv/bin/python -m gestion.semilla            # prepara la base (MODARE_DB) y la rellena si está vacía
+    .venv/bin/python -m gestion.semilla --reset    # BORRA todo y la vuelve a crear con datos de ejemplo
 
 Lo que viene de los CSV (plantas, almacenes, tiendas, tipos de vehículo) es el dato del reto.
 Lo que se inventa aquí está marcado como SINTÉTICO y se puede cambiar desde la app:
@@ -18,7 +18,6 @@ import random
 import unicodedata
 
 import pandas as pd
-import sqlalchemy as sa
 from sqlalchemy import insert
 
 from modare import config as C
@@ -206,14 +205,15 @@ def crear_usuarios():
 
 
 def sembrar(log=print):
+    if os.environ.get("MODARE_ENV", "").lower() in ("produccion", "producción", "production") and (
+            "MODARE_PASSWORD_ADMIN" not in os.environ or "MODARE_PASSWORD_INICIAL" not in os.environ):
+        raise RuntimeError("En producción, la carga inicial necesita MODARE_PASSWORD_ADMIN y MODARE_PASSWORD_INICIAL "
+                           "(no se crean usuarios con las contraseñas de ejemplo).")
     rng = random.Random(2026)
     crear_categorias()
     crear_red(rng)
     crear_flota(rng)
     crear_usuarios()
-    from .modelos import Ajuste
-    Ajuste.set("migracion_almacen_plantas", "1")     # la BD nueva ya nace con el esquema actual
-    Ajuste.set("migracion_vetos", "1")
     db.session.commit()
     log(f"Base de datos creada: {Tienda.query.count()} tiendas, {Planta.query.count()} plantas, "
         f"{Almacen.query.count()} almacenes, {CamionTroncal.query.count()} camiones troncales, "
@@ -223,31 +223,13 @@ def sembrar(log=print):
         f"con contraseña inicial '{PASSWORD_INICIAL}' (cámbiala en 'Mi cuenta').")
 
 
-def sembrar_si_vacia(log=print):
-    db.create_all()          # crea también las tablas nuevas en una BD antigua
-    if not db.session.query(Categoria.id).first():
-        sembrar(log)
-    migrar(log)
-
-
-def migrar(log=print):
-    """Cambios de esquema sobre una gestion.db ya existente (sin perder datos)."""
-    from .modelos import Ajuste
-    insp = sa.inspect(db.engine)
-    if Ajuste.get("migracion_vetos") != "1":
-        # antes: plantas PERMITIDAS por almacén y almacén habitual de cada tienda.
-        # ahora: todo vale salvo lo vetado -> vetadas = todas las plantas − las que estaban permitidas
-        if "almacen_plantas" in insp.get_table_names():
-            permitidas = {}
-            for a_id, p_id in db.session.execute(sa.text("SELECT almacen_id, planta_id FROM almacen_plantas")):
-                permitidas.setdefault(a_id, set()).add(p_id)
-            todas = Planta.query.all()
-            for a in Almacen.query:
-                if a.id in permitidas:
-                    a.plantas_vetadas = [p for p in todas if p.id not in permitidas[a.id]]
-            db.session.execute(sa.text("DROP TABLE almacen_plantas"))
-        if "almacen_id" in {c["name"] for c in insp.get_columns("tiendas")}:
-            db.session.execute(sa.text("UPDATE tiendas SET almacen_id = NULL"))   # columna antigua, ya sin uso
-        Ajuste.set("migracion_vetos", "1")
-        db.session.commit()
-        log("Migración: almacén habitual de las tiendas eliminado; plantas no permitidas convertidas en vetos.")
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--reset", action="store_true", help="BORRA todas las tablas y las vuelve a crear con datos de ejemplo")
+    a = ap.parse_args()
+    from .basedatos import app_bd, borrar_todo, preparar_bd
+    app = app_bd()
+    with app.app_context():
+        if a.reset:
+            borrar_todo()
+        preparar_bd()

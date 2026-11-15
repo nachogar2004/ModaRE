@@ -40,8 +40,8 @@ def salir():
 def cuenta():
     if request.method == "POST":
         if request.form.get("accion") == "datos":
-            current_user.nombre = (request.form.get("nombre") or "").strip() or None
-            current_user.email = (request.form.get("email") or "").strip() or None
+            current_user.nombre = (request.form.get("nombre") or "").strip()[:120] or None
+            current_user.email = (request.form.get("email") or "").strip()[:120] or None
             db.session.commit()
             flash("Datos guardados.")
             return redirect(url_for("auth.cuenta"))
