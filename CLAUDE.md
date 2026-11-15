@@ -141,6 +141,8 @@ code/
   modare/pedidos.py   pedido semanal por (semana ISO, tienda) -> tabla pedidos_optimizador
   modare/planificador.py  orquesta todo y escribe salidas/<semana>/
   modare/visualizar.py    genera salidas/<semana>/mapa.html
+  modare/imputacion.py    coste de transporte por tienda (Planificación → «Coste por tienda» y CSV): troncal por peso
+                          de la ropa de cada tienda en el camión, reparto por distancia almacén→tienda; cuadra al céntimo
   modare/osrm.py      cliente OSRM: matriz de distancias y trazados de rutas (1 petición/s, con caché)
   modare/distancias.py    distancias por carretera en la tabla distancias: qué puntos faltan, cálculo parcial o total
   calcular_distancias.py  CLI de lo anterior (por defecto solo los puntos nuevos o movidos)

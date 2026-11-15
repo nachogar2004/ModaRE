@@ -229,6 +229,11 @@ y se le suman los km.
 - La lista **Lotes** muestra cada lote con su estado (*en cola*, *calculando*, *rutas listas*, *entregado*); al
   pinchar uno se ven sus rutas, camiones y reposiciones.
 - **Ver mapa y analítica** abre el plan del lote (rutas sobre carretera, cronograma, costes).
+- **Coste por tienda**: reparte el coste de transporte del lote entre sus tiendas, para imputarlo o cobrarlo.
+  El **troncal** (planta → almacén) se reparte entre las tiendas que llevan ropa en cada camión **según su peso**; el
+  **reparto** (almacén → tienda), entre las tiendas de cada ruta **según la distancia por carretera** del almacén a
+  cada una. La suma cuadra al céntimo con el coste de transporte del lote. No incluye el coste de los almacenes.
+  Botón **CSV** para abrirlo en Excel (separado por `;`, coma decimal). El cálculo está en `code/modare/imputacion.py`.
 - **Volver a calcular las rutas** repite el cálculo del lote (p. ej. tras añadir camiones o cambiar vetos).
 - **Deshacer lote** borra sus rutas y reposiciones y devuelve sus pedidos a «pendientes de planificar». Solo se
   puede si aún no ha salido nada.

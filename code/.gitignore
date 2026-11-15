@@ -5,3 +5,4 @@ salidas/
 gestion.db
 .env
 pedidos.db.migrado
+gestion.db.*

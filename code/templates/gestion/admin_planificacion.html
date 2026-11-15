@@ -186,6 +186,52 @@
   </table></div>
 </div>
 
+{# ------------------------------------------------------------------ coste por tienda #}
+{% if costes %}
+<div class="card flush" id="costes">
+  <div class="card-head">
+    <h2>Coste por tienda <span class="muted" style="font-weight:500">({{ costes.tiendas|length }})</span></h2>
+    <div class="actions">
+      <div class="search">{{ icono('search') }}<input type="search" placeholder="Buscar tienda, municipio, almacén…" data-filter="#t-costes" aria-label="Buscar tiendas"></div>
+      <a class="btn ghost sm" href="{{ url_for('admin.costes_csv', lote=codigo) }}">{{ icono('download') }}CSV</a>
+    </div>
+  </div>
+  <p class="small" style="padding:6px 20px 0">
+    Reparto del coste de transporte del lote entre las tiendas.
+    <b>Troncal</b> (planta → almacén): el coste de cada camión se reparte entre las tiendas que llevan ropa en él, según su peso.
+    <b>Reparto</b> (almacén → tienda): el coste de cada ruta se reparte entre sus tiendas según la distancia por carretera del almacén a cada una.
+    No incluye el coste de los almacenes (alquiler y manipulación).
+  </p>
+  <div class="kpis" style="padding:10px 20px 0">
+    {{ kpi(costes.troncal_eur|miles ~ ' €', 'troncal repartido por peso', 'truck') }}
+    {{ kpi(costes.reparto_eur|miles ~ ' €', 'reparto repartido por distancia', 'van') }}
+    {{ kpi(costes.imputado_eur|miles ~ ' €', 'imputado a tiendas', 'check-circle', tono='ok' if not costes.sin_imputar_eur else 'warn') }}
+  </div>
+  {% if costes.sin_imputar_eur %}
+  <div class="alerta" style="margin:8px 20px 0">{{ icono('alert') }}<div>{{ costes.sin_imputar_eur|miles(2) }} € no se han podido imputar a ninguna tienda:
+    <ul class="small">{% for m in costes.sin_imputar %}<li>{{ m }}</li>{% endfor %}</ul></div></div>
+  {% endif %}
+  <div class="table-wrap mt"><table id="t-costes">
+    <thead><tr><th>Tienda</th><th>Almacén</th><th class="n">Entregas</th><th class="n">kg</th><th class="n">km almacén</th>
+      <th class="n">Troncal €</th><th class="n">Reparto €</th><th class="n">Total €</th><th class="n">€/kg</th></tr></thead>
+    <tbody>
+    {% for f in costes.tiendas %}
+    <tr><td><b>{{ f.nombre }}</b><span class="sub">{{ f.id }} · {{ f.municipio }}</span></td>
+      <td class="nowrap">{{ f.almacen }}</td><td class="n">{{ f.entregas }}</td><td class="n">{{ f.kg|miles }}</td>
+      <td class="n">{{ f.km_almacen|miles(1) }}</td><td class="n">{{ f.troncal_eur|miles(2) }}</td>
+      <td class="n">{{ f.reparto_eur|miles(2) }}</td><td class="n"><b>{{ f.total_eur|miles(2) }}</b></td>
+      <td class="n">{{ f.eur_kg|miles(3) if f.eur_kg is not none else '—' }}</td></tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr><th>Total</th><th></th><th class="n">{{ costes.tiendas|sum(attribute='entregas') }}</th>
+      <th class="n">{{ costes.tiendas|sum(attribute='kg')|miles }}</th><th></th>
+      <th class="n">{{ costes.tiendas|sum(attribute='troncal_eur')|miles(2) }}</th>
+      <th class="n">{{ costes.tiendas|sum(attribute='reparto_eur')|miles(2) }}</th>
+      <th class="n">{{ costes.tiendas|sum(attribute='total_eur')|miles(2) }}</th><th></th></tr></tfoot>
+  </table></div>
+</div>
+{% endif %}
+
 {# ------------------------------------------------------------------ 4 · reposiciones #}
 <div class="card flush">
   <div class="card-head"><h2>Reposiciones planta → almacén <span class="muted" style="font-weight:500">({{ reps|length }})</span></h2></div>
