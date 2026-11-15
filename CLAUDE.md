@@ -41,7 +41,7 @@ parámetros, vehículos y tarifas). Respetadlas al presentar.
 |---|---|---|
 | `plantas.csv` | 6 plantas (4 activas: MAD, VAL, BCN, BIO; AST y SCQ futuras) | `capacidad_salida_kg_semana`, horario de carga 06–18 h |
 | `almacenes.csv` | 38 almacenes, uno por provincia peninsular con tiendas | **todo SINTÉTICO**: ubicación = **polígono industrial principal** de la provincia (elegido por el equipo en `code/modare/poligonos.py`, coordenadas de OpenStreetMap/Nominatim cacheadas en `poligonos_geocodificados.json`; Zamora fijado a mano, Palencia en el polígono San Blas de Villalobón, junto a la capital), capacidad = 1,5 × demanda media (mín. 1.500 kg/semana), horario 06–20 h L-V, **costes**: `coste_fijo_eur_semana` (superficie según capacidad × alquiler €/m² de la provincia + gastos + gestión: 231–578 €/semana) y `coste_manipulacion_eur_kg` (€/h operario ÷ kg/h: 0,055–0,066 €/kg). Se genera con `code/generar_almacenes.py` (herramienta de la semilla). En la base: Admin → Almacenes |
-| `tiendas.csv` | 175 tiendas peninsulares (las 7 de Baleares se eliminaron: el trabajo no incluye islas) | ventas €/año, tamaño, ventana de recepción, `vehiculo_max`, `en_muestra` (53 para pruebas) |
+| `tiendas.csv` | 175 tiendas peninsulares (las 7 de Baleares se quitaron del CSV del reto; en la base de la app están con `acceso_carretera=0` y el optimizador las excluye) | ventas €/año, tamaño, ventana de recepción, `vehiculo_max`, `en_muestra` (53 para pruebas) |
 | `vehiculos.csv` | 5 tipos: FUR 3,5 t, R75, R12, R18, ART 40 t | carga útil kg, volumen m³, palés |
 | `emisiones.csv` | kgCO₂e/km vacío y lleno por tipo (DEFRA 2025) | de aquí sale el **consumo propio** de cada camión |
 | `tarifas.csv` | Operador A (€/km + €/h, ilimitado) y B (€/día + €/km, unidades limitadas) | |
@@ -243,6 +243,19 @@ flota de camiones, viajes, reposiciones y movimientos; paneles de tienda/planta/
 `/admin/planificacion` y `/central` (siguen accesibles por URL para el admin, sin enlaces). La CLI conserva las
 fuentes por semanas (`--fuente pedidos|estimacion|mixto --semana …`).
 
+**Ubicación en el mapa** (altas/ediciones de tiendas, plantas y almacenes en `admin_form.html`; mapa plegable con «Nueva
+aquí» en `admin_lista.html`): Leaflet + `static/mapa_ubicacion.js`; `gestion/vistas_admin.py` expone
+`/admin/geo/{instalaciones,inversa,buscar}` (proxy de Nominatim, 1 req/s, caché) y valida que el punto esté en la España
+peninsular (`gestion/peninsula.py`, polígono simplificado); las **tiendas** también pueden estar en Baleares (`zona()`): se
+fuerzan a `acceso_carretera=0` y el optimizador las excluye. Al guardar se normaliza la provincia a la grafía de la base
+(`vistas_admin.normalizar`) y se comprueban rangos. Mover/añadir un punto: «Calcular distancias» (ver tabla `distancias`).
+
+**Importar tiendas desde CSV** (Admin → Tiendas → Importar CSV, `gestion/importar.py` + `admin_importar.html`): mismo
+formato que `data/tiendas.csv` (más `kg_semana` opcional; si falta se estima por ventas como en la semilla), vista previa
+sin escribir (nueva / ya existe / repetida / error, con la validación del formulario), confirmación revalidada en servidor
+y en una transacción (aborta si alguna fila elegida cambió de estado/coincidencias desde la vista previa: evita duplicados
+por reenvío o por dos admins); crea cada tienda con `semilla.completar_tienda`. Sin usuario de acceso (la app es solo admin).
+
 ## Supuestos y limitaciones (decidlos/validadlos con la ONG)
 - **Almacenes inventados** (qué polígono, capacidad, horario): ver `almacenes.csv`, `modare/poligonos.py` y `generar_almacenes.py`.
   Para cambiar un almacén: editarlo en la app → «Calcular distancias» en Planificación → optimizar.
@@ -254,7 +267,8 @@ fuentes por semanas (`--fuente pedidos|estimacion|mixto --semana …`).
 - Sincronización troncal/reparto por stock (la reposición de W sirve el reparto de W+1).
 - 1 caja = 12,5 kg (20 cajas/palé) — `config.KG_POR_CAJA`, SINTÉTICO.
 - `unidades_disponibles` del operador B se interpreta **por depósito (planta o almacén) y día**.
-- **Sin islas**: por indicación del reto se eliminaron las 7 tiendas de Baleares; no hay plantas ni almacenes en islas.
+- **Sin islas en las rutas**: las 7 tiendas de Baleares se gestionan en la app con `acceso_carretera=0` (reparto marítimo, por otra vía) y el
+  optimizador las excluye (`modare/datos.py`); no hay plantas ni almacenes en islas (el servidor los rechaza).
 - El usuario mencionó 192 tiendas; `tiendas.csv` tenía 182 (175 tras quitar Baleares).
 - La tarifa €/km ya incluye combustible; los litros y € de gasóleo se reportan solo como información.
 - Las rutas no se encadenan explícitamente por camión (multi-trip): la flota física se estima por solapamiento.

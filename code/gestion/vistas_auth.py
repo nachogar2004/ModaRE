@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 
@@ -5,6 +7,16 @@ from . import inicio_de
 from .modelos import Usuario, ahora, db
 
 bp = Blueprint("auth", __name__)
+
+
+def _ruta_local(sig: str | None) -> bool:
+    """`next` solo puede ser una ruta de esta web. Los navegadores tratan `\\` como `/` y quitan tabuladores y
+    saltos de línea, así que `/\\evil.com` o `/<tab>/evil.com` acabarían en `//evil.com` (otro dominio)."""
+    if not sig or any(ord(ch) < 32 or ord(ch) == 127 for ch in sig):
+        return False
+    s = sig.replace("\\", "/")
+    partes = urlsplit(s)
+    return sig.startswith("/") and not s.startswith("//") and not partes.scheme and not partes.netloc
 
 
 @bp.route("/")
@@ -27,7 +39,7 @@ def entrar():
             u.ultimo_acceso = ahora()
             db.session.commit()
             sig = request.args.get("next")
-            return redirect(sig if sig and sig.startswith("/") and not sig.startswith("//") else inicio_de(u))
+            return redirect(sig if _ruta_local(sig) else inicio_de(u))
         flash("Usuario o contraseña incorrectos.", "error")
     return render_template("gestion/entrar.html")
 

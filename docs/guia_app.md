@@ -68,13 +68,53 @@ Todas las variables de entorno están explicadas en [`code/.env.example`](../cod
 | **Rutas → Panel** (inicio) | Estado actual de un vistazo, con gráficas: coste semanal y en qué se va (troncal, reparto, almacenes), carga de cada planta frente a su capacidad, vehículos que usa el plan, los almacenes que más cuesta servir por kg y dónde está la demanda por provincia. Pasa el ratón por una barra para ver el detalle; cada gráfica tiene «Ver datos» con la tabla. Sin plan calculado solo muestra la red. |
 | **Rutas → Calcular rutas** | Resumen de la red (tiendas, kg/semana, capacidad de las plantas), botón **Calcular rutas** y resultado del último cálculo: coste total con almacenes, transporte, almacenes, rutas, km y entregas a tiempo. |
 | **Rutas → Mapa y analítica** | El plan sobre el mapa, la lista de rutas con sus paradas y horarios, y la descarga de paradas en CSV. |
-| **Red → Tiendas, Plantas, Almacenes** | Alta, edición y baja. En tiendas: kg/semana, ubicación, ventana de recepción, vehículo máximo, vetos. En plantas: capacidad de salida y horario. En almacenes: capacidad, horario, costes y vetos. |
+| **Red → Tiendas, Plantas, Almacenes** | Alta, edición y baja, con la ubicación en un mapa. Tiendas: *Importar CSV* para altas masivas. En tiendas: kg/semana, ubicación, ventana de recepción, vehículo máximo, vetos. En plantas: capacidad de salida y horario. En almacenes: capacidad, horario, costes y vetos. |
 | **Optimizador → Parámetros, Tipos de vehículo, Tarifas** | Los supuestos con los que calcula el optimizador (kg por palé, jornada, frecuencias, capacidades y emisiones de cada vehículo, €/km, €/h, €/día…). Se editan, no se añaden ni se borran. |
 | **Sistema → Usuarios** | Cuentas de administrador. |
 
 **Eliminar**: una tienda, planta o almacén se borra de verdad salvo que tenga historial operativo antiguo
 (pedidos, movimientos); en ese caso se **da de baja** (desactivada), que para las rutas es lo mismo: no entra en el
 cálculo. Los dados de baja se ven con *Mostrar dados de baja* y se pueden reactivar.
+
+**Ubicación en el mapa** (alta y edición de tiendas, plantas y almacenes). En la sección *Ubicación* del formulario
+hay un mapa (OpenStreetMap) para fijar el punto sin escribir coordenadas:
+
+- **Clic en el mapa** o **arrastrar el marcador** rellena latitud y longitud; si escribes las coordenadas, el marcador se mueve.
+- **Buscador de direcciones** (Enter o *Buscar*): elige un resultado y el mapa se centra ahí.
+- Al colocar el punto se rellenan dirección, municipio, provincia, comunidad y polígono **solo en los campos vacíos o
+  rellenados antes por el mapa**; lo que hayas escrito tú no se pisa. *Rellenar dirección desde el punto* lo fuerza.
+- Se dibujan las demás tiendas (azul), plantas (verde) y almacenes (dorado) y se indica el **almacén más cercano** en línea recta.
+- Plantas y almacenes solo en la **España peninsular**. Las **tiendas** también en **Baleares**: se gestionan en la app,
+  pero se guardan siempre sin *Acceso por carretera* (el mapa desmarca la casilla y lo avisa; el servidor lo fuerza) y el
+  optimizador no las incluye (transporte marítimo). Canarias, Ceuta, Melilla y otros países se rechazan.
+- En la lista de cada una hay un mapa plegable: un clic en el mapa abre el alta con esas coordenadas.
+- La provincia se ajusta a la grafía de la base (sin tildes, alias como Vizcaya → Bizkaia, «Valencia/València») y se avisa
+  si no es de la red: la asignación del optimizador empareja provincias por nombre exacto.
+- Tras crear o mover una instalación, calcula sus distancias por carretera (Rutas → *Calcular distancias*).
+- Las direcciones vienen de Nominatim (OpenStreetMap) a través del servidor (1 consulta/s). Sin conexión el formulario
+  sigue funcionando con latitud y longitud a mano.
+
+**Importar tiendas desde CSV** (*Red → Tiendas → Importar CSV*). Para dar de alta muchas tiendas a la vez:
+
+1. **Subir** un CSV con la misma estructura que `data/tiendas.csv` (botones *Plantilla CSV* y *Plantilla para Excel*:
+   cabeceras y una fila de ejemplo). Obligatorias: `nombre`, `municipio`, `provincia`, `lat`, `lon`, `categoria_tamano`; el
+   resto toma los valores por defecto de la carga inicial (L-V, 10:00–14:00, 30 min de descarga…). **`kg_semana`**
+   (opcional) es lo que reparte el optimizador; si falta se estima por las ventas como en la carga inicial (sin ventas, con la
+   media de una tienda, `ventas_media_eur_tienda`, SINTÉTICO). También se guardan `en_muestra` y `planta_actual`.
+   `id_tienda` vacío = siguiente TD-### libre, correlativo dentro del fichero. Columnas desconocidas se ignoran (se avisa).
+   Separador `,` o `;`, UTF-8 con o sin BOM (o Windows-1252, con aviso), coma decimal; en cantidades también punto de miles
+   (`140.000`, `1.234,5`; unas ventas < 1.000 € se avisan); fechas AAAA-MM-DD o DD/MM/AAAA. Máximo 500 filas, 100 columnas y 1 MB.
+2. **Vista previa** (no guarda nada): cada fila con su estado. **Nueva** (marcada); **Ya existe**: mismo código (no se puede
+   importar) o *probable* (mismo nombre y municipio, misma dirección y municipio, o a menos de 50 m de una tienda de la base,
+   con enlace a ella: desmarcada, márcala si de verdad es otra tienda); **Repetida** dentro del fichero (si repite el código no
+   se puede importar); **Error** con el motivo (las mismas reglas que el formulario: obligatorios, números, tamaño, vehículo,
+   horas HH:MM, días L-V/M-V, código TD-###, rangos, ubicación fuera de la península y Baleares…). Avisos que no impiden
+   importar: kg/semana estimados, provincia desconocida, tienda insular, sin `vehiculo_max` (= puede llegar hasta un R18).
+   Filtros *todas / nuevas / con aviso / errores*, *Marcar nuevas* / *Ninguna* y contador de marcadas.
+3. **Importar las marcadas**: el servidor vuelve a validar todo y guarda **todas o ninguna**. Si alguna fila marcada ha cambiado
+   de estado o de coincidencias desde la vista previa (otro admin importó lo mismo, o se reenvía el formulario ya importado)
+   no se guarda nada y se enseña la vista previa actualizada. Las tiendas no reciben usuario (la app es solo del administrador).
+4. **Después**: calcula las distancias de los puntos nuevos (Rutas → *Calcular distancias*) y vuelve a calcular las rutas.
 
 ---
 

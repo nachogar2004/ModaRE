@@ -24,7 +24,7 @@ import pandas as pd
 from sqlalchemy import insert
 
 from modare import config as C
-from modare.datos import kg_semana_estimado, valor_parametro
+from modare.datos import valor_parametro
 
 from .modelos import (SEGMENTOS, TIPOS_PRENDA, Ajuste, Almacen, CamionReparto, CamionTroncal, Categoria, Distancia,
                       Parametro, Planta, StockPlanta, StockTienda, Tarifa, Tienda, TipoVehiculo, Usuario, Venta, db)
@@ -219,38 +219,62 @@ def crear_red(rng: random.Random):
     hoy = dt.date.today()
     filas_venta = []
     for r in _csv("tiendas.csv").itertuples():
-        t_ser = pd.Series(r._asdict())
-        kg_sem = kg_semana_estimado(t_ser, P)
-        ventas_eur = r.ventas_periodo if r.ventas_unidad == "EUR" else r.ventas_periodo / 100 * P["ventas_media_eur_tienda"]
-        prendas_dia = kg_sem / kg_medio / 6                     # se vende de lunes a sábado
-        cat_tam = r.categoria_tamano
         t = Tienda(id=r.id_tienda, nombre=r.nombre, subtipo=_txt(r.subtipo), direccion=_txt(r.direccion),
                    municipio=r.municipio, provincia=r.provincia, ccaa=_txt(r.ccaa), lat=r.lat, lon=r.lon,
                    acceso_carretera=bool(r.acceso_carretera), superficie_m2=None if pd.isna(r.superficie_m2) else r.superficie_m2,
-                   categoria_tamano=cat_tam, ventas_anuales_eur=float(ventas_eur), kg_semana=round(kg_sem, 1),
-                   dias_recepcion=_txt(r.dias_recepcion, "L-V"), ventana_inicio=_txt(r.ventana_inicio, "10:00"),
-                   ventana_fin=_txt(r.ventana_fin, "14:00"), tiempo_descarga_min=int(r.tiempo_descarga_min),
-                   vehiculo_max=_txt(r.vehiculo_max),
-                   # SINTÉTICO: las pequeñas piden al mes, el resto cada jueves (se cierran pedidos el viernes)
-                   frecuencia_pedido="mensual" if cat_tam == "pequeña" else "semanal",
-                   dia_pedido=1 if cat_tam == "pequeña" else 3, dias_seguridad=3,
-                   capacidad_max_prendas=int(prendas_dia * 6 * 5),
-                   en_muestra=bool(r.en_muestra), planta_actual=_txt(r.planta_actual),
+                   categoria_tamano=r.categoria_tamano, ventas_anuales_eur=ventas_eur(r.ventas_periodo, r.ventas_unidad, P),
+                   dias_recepcion=_txt(r.dias_recepcion), ventana_inicio=_txt(r.ventana_inicio),
+                   ventana_fin=_txt(r.ventana_fin), tiempo_descarga_min=int(r.tiempo_descarga_min),
+                   vehiculo_max=_txt(r.vehiculo_max), en_muestra=bool(r.en_muestra), planta_actual=_txt(r.planta_actual),
                    activa=bool(r.activa), fecha_alta=pd.to_datetime(r.fecha_alta).date() if not pd.isna(r.fecha_alta) else hoy)
-        t.stock = [StockTienda(categoria_id=k, unidades=v)
-                   for k, v in _reparto_por_categoria(prendas_dia * 4, cats).items()]   # ~4 días de venta
+        filas_venta += completar_tienda(t, cats, P, rng, hoy)
         db.session.add(t)
-        for d in range(DIAS_HISTORIAL, 0, -1):
-            f = hoy - dt.timedelta(days=d)
-            if f.weekday() == 6:
-                continue
-            for c in cats:
-                u = _poisson(rng, prendas_dia * c.cuota_ventas)
-                if u:
-                    filas_venta.append({"tienda_id": r.id_tienda, "categoria_id": c.id, "fecha": f,
-                                        "unidades": u, "sintetica": True})
     db.session.flush()
     db.session.execute(insert(Venta), filas_venta)
+
+
+# --- tienda nueva: lo mismo en la semilla y en la importación CSV de la app (gestion/importar.py) ---------------
+def ventas_eur(periodo, unidad, P: dict) -> float:
+    """ventas_periodo del CSV en €/año (unidad EUR o INDICE: 100 = tienda media)."""
+    return float(periodo) if unidad == "EUR" else float(periodo) / 100 * P["ventas_media_eur_tienda"]
+
+
+def defectos_tienda(categoria_tamano: str | None) -> dict:
+    """Valores por defecto de lo que no trae el CSV. SINTÉTICO: las pequeñas piden al mes, el resto cada jueves
+    (se cierran pedidos el viernes)."""
+    peq = categoria_tamano == "pequeña"
+    return {"dias_recepcion": "L-V", "ventana_inicio": "10:00", "ventana_fin": "14:00", "tiempo_descarga_min": 30,
+            "frecuencia_pedido": "mensual" if peq else "semanal", "dia_pedido": 1 if peq else 3, "dias_seguridad": 3}
+
+
+def completar_tienda(t: Tienda, cats, P: dict, rng: random.Random | None = None, hoy: dt.date | None = None,
+                     dias_ventas: int = DIAS_HISTORIAL) -> list[dict]:
+    """Rellena lo que falte con los defectos, la capacidad (5 semanas de venta) y el stock inicial (~4 días de venta,
+    SINTÉTICO) a partir de ventas_anuales_eur. Con `rng`, devuelve `dias_ventas` días de ventas simuladas
+    (Poisson, sin domingos, marcadas sintetica) para insertar después de crear la tienda."""
+    hoy = hoy or dt.date.today()
+    for k, v in defectos_tienda(t.categoria_tamano).items():
+        if getattr(t, k) is None:
+            setattr(t, k, v)
+    kg_medio = sum(c.cuota_ventas * c.kg_unidad for c in cats)   # kg por prenda vendida, en media
+    kg_sem = (t.ventas_anuales_eur or 0) / P["precio_medio_eur_kg"] / P["semanas_venta_anio"]   # = kg_semana_estimado
+    if t.kg_semana is None:                                      # la demanda que reparte el optimizador
+        t.kg_semana = round(kg_sem, 1)
+    prendas_dia = kg_sem / kg_medio / 6                          # se vende de lunes a sábado
+    if t.capacidad_max_prendas is None:
+        t.capacidad_max_prendas = int(prendas_dia * 6 * 5)
+    t.stock = [StockTienda(categoria_id=k, unidades=v)
+               for k, v in _reparto_por_categoria(prendas_dia * 4, cats).items()]   # ~4 días de venta
+    filas = []
+    for d in range(dias_ventas, 0, -1) if rng else ():
+        f = hoy - dt.timedelta(days=d)
+        if f.weekday() == 6:
+            continue
+        for c in cats:
+            u = _poisson(rng, prendas_dia * c.cuota_ventas)
+            if u:
+                filas.append({"tienda_id": t.id, "categoria_id": c.id, "fecha": f, "unidades": u, "sintetica": True})
+    return filas
 
 
 def _poisson(rng: random.Random, lam: float) -> int:

@@ -2,13 +2,22 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+import math
 import re
+import secrets
 import threading
+import time
 import traceback
+import unicodedata
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from flask import Blueprint, abort, current_app, flash, jsonify, redirect, render_template, request, url_for
+from flask import (Blueprint, abort, current_app, flash, g, jsonify, make_response, redirect, render_template, request,
+                   url_for)
 from flask_login import current_user, login_required
 from sqlalchemy import func
 from sqlalchemy.exc import DataError, IntegrityError
@@ -17,14 +26,16 @@ from modare import config as C
 from modare import bd as BD
 from modare import distancias as DIST
 from modare.datos import valor_parametro
+from modare.osrm import contexto_ssl
 from modare.planificador import cargar_plan
 
 from . import logistica as L
 from . import optimizador as OPT
 from . import rol_requerido
 from .modelos import (DIAS_SEMANA, ESTADOS_CAMION, ESTADOS_PEDIDO, FRECUENCIAS, ROLES, Ajuste, Almacen, CamionReparto,
-                      CamionTroncal, Categoria, MovimientoStock, Parametro, Pedido, Planta, Reposicion, Tarifa, Tienda,
-                      TipoVehiculo, Usuario, Venta, Viaje, db)
+                      CamionTroncal, Categoria, MovimientoStock, Parametro, Pedido, Planta, Reposicion, StockPlanta,
+                      StockTienda, Tarifa, Tienda, TipoVehiculo, Usuario, Venta, Viaje, db)
+from . import peninsula
 from .semilla import _slug, capacidad_vehiculos
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -48,6 +59,7 @@ class Campo:
     ayuda: str = ""
     solo_alta: bool = False       # p. ej. el id no se cambia después
     modelo: Any = None            # tipo "multi": modelo de los elementos marcados
+    validar: Callable[[Any], None] | None = None   # comprobación extra del valor (lanza ValueError)
 
 
 @dataclass
@@ -65,6 +77,7 @@ class Entidad:
     filtros: list[str] = field(default_factory=list)
     solo_edicion: bool = False               # sin altas ni bajas (datos que el optimizador necesita completos)
     validar: Callable | None = None          # comprobaciones extra antes de guardar (lanza ValueError)
+    patron_id: str | None = None             # formato obligatorio del código (regex)
 
 
 def _op_plantas():
@@ -91,6 +104,24 @@ def _op(d: dict):
 
 
 _HORA = "HH:MM"
+
+
+def _rango(minimo=None, maximo=None):
+    def validar(v):
+        if (minimo is not None and v < minimo) or (maximo is not None and v > maximo):
+            raise ValueError(f"{v:g} está fuera de rango (" + (f"mín. {minimo}" if minimo is not None else "")
+                             + (", " if minimo is not None and maximo is not None else "")
+                             + (f"máx. {maximo}" if maximo is not None else "") + ")")
+    return validar
+
+
+def _rango_dias(v: str):
+    """«L-V», «M-V»…: lo que entiende la librería de rutas (modare.datos.dias_desde_rango)."""
+    a, _, b = v.partition("-")
+    if not (a in C.DIAS and b in C.DIAS and C.DIAS.index(a) <= C.DIAS.index(b)):
+        raise ValueError(f"«{v}» no es un rango de días válido (p. ej. L-V, M-V; días {''.join(C.DIAS)})")
+
+
 TAMANOS = {"pequeña": "Pequeña", "mediana": "Mediana", "grande": "Grande"}
 VEH_MAX = {"": "Sin límite (hasta R18)", "VEH-FUR": "Furgoneta 3,5 t", "VEH-R75": "Rígido 7,5 t",
            "VEH-R12": "Rígido 12 t", "VEH-R18": "Rígido 18 t"}
@@ -115,10 +146,17 @@ def _rellenar_camion(c, _form):
     c.estado = c.estado or "disponible"
 
 
+def num_tienda(i: str) -> int | None:
+    return int(i[3:]) if re.fullmatch(r"TD-\d+", i or "") else None
+
+
+def max_num_tienda() -> int:
+    return max((n for (i,) in db.session.query(Tienda.id) if (n := num_tienda(i)) is not None), default=0)
+
+
 def _id_tienda(_obj):
     """Siguiente TD-### (numérico: TD-1000 va después de TD-999, no antes)."""
-    nums = [int(i.split("-")[1]) for (i,) in db.session.query(Tienda.id) if re.fullmatch(r"TD-\d+", i)]
-    return f"TD-{max(nums, default=0) + 1:03d}"
+    return f"TD-{max_num_tienda() + 1:03d}"
 
 
 def _alta_usuario(u, form):
@@ -157,18 +195,20 @@ ENTIDADES: dict[str, Entidad] = {
          Campo("direccion", "Dirección"), Campo("municipio", "Municipio", requerido=True),
          Campo("provincia", "Provincia", requerido=True), Campo("ccaa", "Comunidad autónoma"),
          Campo("lat", "Latitud", "float", requerido=True), Campo("lon", "Longitud", "float", requerido=True),
-         Campo("acceso_carretera", "Acceso por carretera", "bool", ayuda="Desmarcar en islas (envío marítimo)"),
-         Campo("superficie_m2", "Superficie (m²)", "float"),
+         Campo("acceso_carretera", "Acceso por carretera", "bool",
+               ayuda="En Baleares se desmarca siempre: el optimizador no la incluye (envío marítimo)"),
+         Campo("superficie_m2", "Superficie (m²)", "float", validar=_rango(0)),
          Campo("categoria_tamano", "Tamaño", "select", _op(TAMANOS), requerido=True,
                ayuda="Las grandes reciben 2 entregas por semana; el resto, 1"),
-         Campo("kg_semana", "Ropa que necesita (kg/semana)", "float", requerido=True,
+         Campo("kg_semana", "Ropa que necesita (kg/semana)", "float", requerido=True, validar=_rango(0),
                ayuda="Lo que se le reparte cada semana. Orientativo: ventas anuales ÷ 12 €/kg ÷ 50 semanas"),
-         Campo("ventas_anuales_eur", "Ventas anuales (€)", "float", ayuda="Informativo: de aquí salió la estimación inicial de kg/semana"),
+         Campo("ventas_anuales_eur", "Ventas anuales (€)", "float", validar=_rango(0),
+               ayuda="Informativo: de aquí salió la estimación inicial de kg/semana"),
          Campo("almacenes_vetados", "Almacenes de los que NO quiere recibir ropa", "multi", _op_almacenes, modelo=Almacen,
                ayuda="Por defecto ninguno: el optimizador elige el almacén que mejor la sirve"),
-         Campo("dias_recepcion", "Días de recepción", ayuda="L-V, M-V…"),
+         Campo("dias_recepcion", "Días de recepción", ayuda="L-V, M-V…", validar=_rango_dias),
          Campo("ventana_inicio", "Recepción desde", "time"), Campo("ventana_fin", "Recepción hasta", "time"),
-         Campo("tiempo_descarga_min", "Tiempo de descarga (min)", "int"),
+         Campo("tiempo_descarga_min", "Tiempo de descarga (min)", "int", validar=_rango(1, 600)),
          Campo("vehiculo_max", "Vehículo máximo que puede llegar", "select", _op(VEH_MAX)),
          Campo("en_muestra", "En la muestra de pruebas", "bool", ayuda="optimizar.py --muestra usa solo estas tiendas"),
          Campo("planta_actual", "Planta que la sirve hoy", "select", _op_plantas,
@@ -177,7 +217,8 @@ ENTIDADES: dict[str, Entidad] = {
          Campo("activa", "Activa", "bool", ayuda="Desmarcada = no entra en las rutas")],
         [("id", "Código"), ("nombre", "Nombre"), ("provincia", "Provincia"), ("categoria_tamano", "Tamaño"),
          ("kg_semana", "kg/semana"), ("ventana_txt", "Recepción"), ("almacenes_vetados_txt", "Vetados"), ("activa", "Activa")],
-        orden=Tienda.id, activo="activa", id_auto=_id_tienda, filtros=["provincia", "nombre", "id"]),
+        orden=Tienda.id, activo="activa", id_auto=_id_tienda, filtros=["provincia", "nombre", "id"],
+        patron_id=r"TD-\d{3,}"),
     "plantas": Entidad(
         Planta, "Plantas", "planta",
         [Campo("id", "Código", requerido=True, ayuda="PL-XXX", solo_alta=True), Campo("nombre", "Nombre", requerido=True),
@@ -199,11 +240,11 @@ ENTIDADES: dict[str, Entidad] = {
          Campo("lat", "Latitud", "float", requerido=True), Campo("lon", "Longitud", "float", requerido=True),
          Campo("capacidad_kg_semana", "Capacidad de reparto (kg/semana)", "float", requerido=True),
          Campo("hora_inicio", "Abre", "time"), Campo("hora_fin", "Cierra", "time"),
-         Campo("dias_recepcion", "Días de recepción", ayuda="L-V"),
-         Campo("tiempo_descarga_min", "Tiempo de descarga del camión troncal (min)", "int"),
-         Campo("coste_fijo_eur_semana", "Coste fijo (€/semana)", "float",
+         Campo("dias_recepcion", "Días de recepción", ayuda="L-V", validar=_rango_dias),
+         Campo("tiempo_descarga_min", "Tiempo de descarga del camión troncal (min)", "int", validar=_rango(1, 600)),
+         Campo("coste_fijo_eur_semana", "Coste fijo (€/semana)", "float", validar=_rango(0),
                ayuda="Alquiler + gastos + gestión. El optimizador lo paga si el almacén está abierto. Vacío = mediana del resto"),
-         Campo("coste_manipulacion_eur_kg", "Coste de manipulación (€/kg)", "float",
+         Campo("coste_manipulacion_eur_kg", "Coste de manipulación (€/kg)", "float", validar=_rango(0),
                ayuda="€/h de operario ÷ kg/h. Vacío = mediana del resto"),
          Campo("plantas_vetadas", "Plantas de las que NO quiere recibir ropa", "multi", _op_plantas, modelo=Planta,
                ayuda="Por defecto ninguna: el optimizador elige la planta que mejor lo repone"),
@@ -364,12 +405,15 @@ def _valor(campo: Campo, raw: str | None):
         if campo.tipo == "int":
             return int(raw)
         if campo.tipo == "float":
-            return float(raw.replace(",", "."))
+            v = float(raw.replace(",", "."))
+            if not math.isfinite(v):
+                raise ValueError
+            return v
         if campo.tipo == "date":
             return dt.date.fromisoformat(raw)
     except ValueError:
         raise ValueError(f"«{campo.etiqueta}» no es válido: {raw}")
-    if campo.tipo == "time" and not re.fullmatch(r"\d{2}:\d{2}", raw):
+    if campo.tipo == "time" and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", raw):
         raise ValueError(f"«{campo.etiqueta}» debe tener formato {_HORA}")
     return raw
 
@@ -389,11 +433,234 @@ def _aplicar(e: Entidad, obj, form, alta: bool):
             continue
         if c.requerido and v is None:
             raise ValueError(f"«{c.etiqueta}» es obligatorio.")
+        if v is not None and c.tipo == "select" and c.opciones:
+            validos = [str(k) for k, _ in c.opciones() if k != ""]
+            if str(v) not in validos:
+                raise ValueError(f"«{c.etiqueta}» no admite «{v}»"
+                                 + (f" (valores: {', '.join(validos)})." if len(validos) <= 8 else "."))
+        if v is not None and c.validar:
+            try:
+                c.validar(v)
+            except ValueError as ex:
+                raise ValueError(f"«{c.etiqueta}»: {ex}")
         col = e.modelo.__table__.c.get(c.nombre)
         largo = getattr(getattr(col, "type", None), "length", None)
         if isinstance(v, str) and largo and len(v) > largo:   # PostgreSQL lo rechazaría (SQLite no avisa)
             raise ValueError(f"«{c.etiqueta}» admite como máximo {largo} caracteres (tiene {len(v)}).")
         setattr(obj, c.nombre, v)
+
+
+# ----------------------------------------------------------------------------- ubicación en el mapa
+ENT_GEO = ("tiendas", "plantas", "almacenes")
+
+
+def _coordenadas_validas(lat, lon) -> bool:
+    return math.isfinite(lat) and math.isfinite(lon) and abs(lat) <= 90 and abs(lon) <= 180
+
+
+def validar_id(e: Entidad, obj):
+    if e.patron_id and obj.id and not re.fullmatch(e.patron_id, obj.id):
+        raise ValueError(f"El código «{obj.id}» no tiene el formato esperado ({e.patron_id.replace(chr(92) + 'd{3,}', '###')}).")
+
+
+def _validar_ubicacion(obj):
+    """Plantas y almacenes solo en la España peninsular; las tiendas también en Baleares (gestion/peninsula.py)."""
+    if obj.lat is None or obj.lon is None:
+        return
+    msg = peninsula.motivo_fuera(obj.lat, obj.lon, islas=isinstance(obj, Tienda))
+    if msg:
+        raise ValueError(msg)
+
+
+AVISO_INSULAR = ("Tienda insular: se gestiona en la plataforma, pero el optimizador de rutas no la incluye "
+                 "(transporte marítimo).")
+
+
+def canon_provincia(v: str, conocidos: dict | None = None) -> tuple[str, bool]:
+    """Grafía de la BD para una provincia escrita a mano (sin tildes, alias y nombres bilingües, como el geocodificador).
+    Devuelve (valor, conocida). La asignación del optimizador empareja provincias por nombre exacto."""
+    if conocidos is None:
+        conocidos = _valores_bd(Tienda.provincia, Almacen.provincia, Planta.provincia)
+    for n in [_sin_tildes(v)] + [_sin_tildes(x) for x in (v or "").split("/")]:
+        n = _ALIAS_PROV.get(n, n)
+        if n in conocidos:
+            return conocidos[n], True
+    return v, False
+
+
+def normalizar(obj, provincias: dict | None = None) -> list[str]:
+    """Tras `_aplicar`: provincia con la grafía de la BD, reglas entre campos de la tienda y Baleares.
+    Devuelve avisos (no bloquean); ValueError si algo no vale."""
+    avisos = []
+    if isinstance(obj, (Tienda, Planta, Almacen)) and obj.provincia:
+        obj.provincia, conocida = canon_provincia(obj.provincia, provincias)
+        if not conocida:
+            avisos.append(f"Provincia «{obj.provincia}» desconocida en la red: revisa la grafía "
+                          "(el optimizador empareja por nombre exacto con el almacén provincial).")
+    if isinstance(obj, Tienda):
+        d = obj.dia_pedido
+        if d is not None and obj.frecuencia_pedido == "semanal" and not 0 <= d <= 6:
+            raise ValueError("«Día de pedido»: con pedido semanal va de 0 (lunes) a 6 (domingo).")
+        if d is not None and obj.frecuencia_pedido == "mensual" and not 1 <= d <= 28:
+            raise ValueError("«Día de pedido»: con pedido mensual va del 1 al 28.")
+        if forzar_insular(obj):
+            avisos.append(AVISO_INSULAR)
+        elif obj.acceso_carretera is False:
+            avisos.append("Tienda peninsular sin «Acceso por carretera»: el optimizador de rutas no la incluirá.")
+    return avisos
+
+
+def forzar_insular(obj) -> bool:
+    """Una tienda en Baleares nunca tiene acceso por carretera (así la excluye el optimizador). True si es insular."""
+    if isinstance(obj, Tienda) and obj.lat is not None and obj.lon is not None \
+            and peninsula.zona(obj.lat, obj.lon) == "baleares":
+        obj.acceso_carretera = False
+        return True
+    return False
+
+
+def _prellenar(obj):
+    """/nuevo?lat=..&lon=..[&municipio=..&provincia=..] rellena la ficha (clic en el mapa de la lista)."""
+    try:
+        lat, lon = (float(request.args.get(k, "").replace(",", ".")) for k in ("lat", "lon"))
+    except ValueError:
+        lat = lon = math.nan
+    if _coordenadas_validas(lat, lon):
+        obj.lat, obj.lon = round(lat, 6), round(lon, 6)
+    for k in ("municipio", "provincia"):
+        if request.args.get(k):
+            setattr(obj, k, request.args[k].strip()[:120])
+
+
+@bp.get("/geo/instalaciones")
+def geo_instalaciones():
+    """Todas las instalaciones con coordenadas, para dibujarlas como contexto en el mapa."""
+    out = {}
+    for clave, m, act in (("tiendas", Tienda, "activa"), ("plantas", Planta, "activa"), ("almacenes", Almacen, "activo")):
+        out[clave] = [{"id": o.id, "nombre": o.nombre, "lat": o.lat, "lon": o.lon, "activo": bool(getattr(o, act))}
+                      for o in m.query.order_by(m.id) if o.lat is not None and o.lon is not None]
+    return jsonify(out)
+
+
+NOMINATIM = "https://nominatim.openstreetmap.org"
+_geo_lock = threading.Lock()
+_geo_ultima = 0.0
+_geo_cache: dict[str, Any] = {}
+
+
+def _nominatim(ruta: str, **params):
+    """Petición a Nominatim: 1/s como máximo (política de uso), User-Agent genérico y caché en memoria."""
+    global _geo_ultima
+    url = f"{NOMINATIM}/{ruta}?" + urllib.parse.urlencode({**params, "format": "jsonv2", "addressdetails": 1,
+                                                          "accept-language": "es"})
+    with _geo_lock:
+        if url in _geo_cache:
+            return _geo_cache[url]
+        time.sleep(max(0.0, _geo_ultima + 1.05 - time.monotonic()))
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "ModaRE-gestion/1.0"})
+            with urllib.request.urlopen(req, timeout=8, context=contexto_ssl()) as r:
+                datos = json.load(r)
+        finally:
+            _geo_ultima = time.monotonic()
+        if len(_geo_cache) > 500:
+            _geo_cache.clear()
+        _geo_cache[url] = datos
+        return datos
+
+
+def _sin_tildes(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", s or "") if unicodedata.category(c) != "Mn").lower().strip()
+
+
+# alias (sin tildes, minúsculas) -> grafía buscada en la BD (también sin tildes). Incluye las comunidades
+# uniprovinciales, donde Nominatim no da provincia y se usa la comunidad (state)
+_ALIAS_PROV = {"alacant": "alicante", "castello": "castellon", "vizcaya": "bizkaia", "guipuzcoa": "gipuzkoa",
+               "araba": "araba/alava", "alava": "araba/alava", "la coruna": "a coruna", "orense": "ourense",
+               "gerona": "girona", "lerida": "lleida", "baleares": "illes balears", "comunidad de madrid": "madrid",
+               "principado de asturias": "asturias", "region de murcia": "murcia",
+               "comunidad foral de navarra": "navarra", "nafarroa": "navarra"}
+_ALIAS_CCAA = {"catalunya": "cataluna", "euskadi": "pais vasco", "comunidad valenciana": "comunitat valenciana",
+               "comunidad foral de navarra": "navarra", "nafarroa": "navarra", "galiza": "galicia"}
+
+
+def _valores_bd(*columnas) -> dict[str, str]:
+    """Valores distintos de esas columnas: {sin tildes: grafía que ya usa la BD}."""
+    out = {}
+    for col in columnas:
+        for (v,) in db.session.query(col).distinct():
+            if v:
+                out.setdefault(_sin_tildes(v), v)
+    return out
+
+
+def _canonico(address: dict, claves: tuple, alias: dict, conocidos: dict) -> str:
+    """Primer valor de `claves` que coincide con la BD (sin tildes, con alias y nombres bilingües «Valencia/València»);
+    si ninguno coincide, el alias conocido (p. ej. Navarra, que no está en la BD) o el primero tal cual."""
+    primero = de_alias = ""
+    for k in claves:
+        for parte in (address.get(k) or "").split("/"):
+            n = _sin_tildes(parte)
+            if not n:
+                continue
+            primero = primero or parte.strip()
+            if n in alias:
+                n = de_alias = alias[n]
+            if n in conocidos:
+                return conocidos[n]
+    return de_alias.title() or primero
+
+
+def _normalizar(r: dict, lat=None, lon=None) -> dict:
+    a = r.get("address") or {}
+    provs = _valores_bd(Tienda.provincia, Almacen.provincia, Planta.provincia)
+    # «province» no existe en las comunidades uniprovinciales: se recurre a «state»
+    provincia = _canonico(a, ("province", "state"), _ALIAS_PROV, provs)
+    calle = a.get("road") or a.get("pedestrian") or a.get("path") or ""
+    return {
+        "lat": round(float(lat if lat is not None else r["lat"]), 6),
+        "lon": round(float(lon if lon is not None else r["lon"]), 6),
+        "direccion": ", ".join(x for x in (calle, a.get("house_number")) if x),
+        "municipio": next((a[k] for k in ("city", "town", "village", "municipality", "hamlet") if a.get(k)), ""),
+        "provincia": provincia,
+        "ccaa": _canonico(a, ("state",), _ALIAS_CCAA, _valores_bd(Tienda.ccaa)),
+        "poligono": a.get("industrial", ""),
+        "etiqueta": r.get("display_name", ""),
+    }
+
+
+def _geo_respuesta(f):
+    try:
+        return f()
+    except (OSError, ValueError, KeyError) as ex:        # URLError y timeouts son OSError
+        current_app.logger.warning("Nominatim: %s", ex)
+        return jsonify(error="No se pudo consultar el servicio de direcciones (OpenStreetMap). "
+                             "Puedes escribir los datos a mano."), 502
+
+
+@bp.get("/geo/inversa")
+def geo_inversa():
+    try:
+        lat, lon = float(request.args["lat"]), float(request.args["lon"])
+    except (KeyError, ValueError):
+        return jsonify(error="Faltan lat y lon."), 400
+    if not _coordenadas_validas(lat, lon):
+        return jsonify(error="Coordenadas fuera de rango."), 400
+
+    def consulta():
+        r = _nominatim("reverse", lat=round(lat, 5), lon=round(lon, 5), zoom=18)
+        if not isinstance(r, dict) or "address" not in r:
+            return jsonify(error="No hay ninguna dirección conocida en ese punto."), 404
+        return jsonify(_normalizar(r, lat, lon))
+    return _geo_respuesta(consulta)
+
+
+@bp.get("/geo/buscar")
+def geo_buscar():
+    q = request.args.get("q", "").strip()[:200]
+    if len(q) < 3:
+        return jsonify(error="Escribe al menos 3 caracteres."), 400
+    return _geo_respuesta(lambda: jsonify([_normalizar(r) for r in _nominatim("search", q=q, limit=5, countrycodes="es")]))
 
 
 @bp.route("/<ent>")
@@ -417,15 +684,23 @@ def editar(ent, oid=None):
     if alta and e.solo_edicion:
         abort(404)
     obj = e.modelo() if alta else _obtener(e, oid)
+    geo = ent in ENT_GEO
+    antes = None if alta or not geo else (obj.lat, obj.lon)
+    if alta and geo and request.method == "GET":
+        _prellenar(obj)
     if request.method == "POST":
         punto_antes = _punto(ent, obj) if not alta else None
         try:
             _aplicar(e, obj, request.form, alta)
             if e.validar:
                 e.validar(obj)
+            if geo and (alta or antes != (obj.lat, obj.lon)):      # no bloquea editar lo que ya estaba
+                _validar_ubicacion(obj)
+            avisos = normalizar(obj)
             if alta:
                 if e.id_auto and not obj.id:
                     obj.id = e.id_auto(obj)
+                validar_id(e, obj)
                 for c in ("activa", "activo"):
                     if hasattr(obj, c) and getattr(obj, c) is None:
                         setattr(obj, c, True)
@@ -438,6 +713,8 @@ def editar(ent, oid=None):
                 _rellenar_camion(obj, request.form)
             db.session.commit()
             flash(f"Guardado: {e.singular} {obj.id}.")
+            for av in avisos:
+                flash(av)
             _marcar_red_cambiada(ent)
             _avisar_distancias(ent, obj, alta, punto_antes)
             return redirect(url_for("admin.lista", ent=ent))
@@ -450,7 +727,7 @@ def editar(ent, oid=None):
             if not alta:
                 obj = _obtener(e, oid)
     return render_template("gestion/admin_form.html", e=e, ent=ent, obj=obj, alta=alta, form=request.form,
-                           secciones=secciones(ent, e), oid=oid)
+                           secciones=secciones(ent, e), oid=oid, peninsula=peninsula.para_js(ent == "tiendas") if geo else None)
 
 
 RED = {"tiendas", "plantas", "almacenes", "parametros", "vehiculos", "tarifas"}

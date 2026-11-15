@@ -85,12 +85,14 @@ def init_app(app):
     # (asignación directa: Flask ya trae estas claves definidas y setdefault no las cambiaría)
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"      # el navegador no manda la sesión desde otras webs
     app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["MAX_CONTENT_LENGTH"] = app.config.get("MAX_CONTENT_LENGTH") or 2 * 1024 * 1024   # subidas; más → 413
     db.init_app(app)
     # render_as_batch: SQLite no sabe alterar columnas; Alembic recrea la tabla. En PostgreSQL no hace falta.
     migrate.init_app(app, db, directory=str(DIR_MIGRACIONES), render_as_batch=url.startswith("sqlite"))
     login.init_app(app)
 
     from .vistas_admin import bp as bp_admin
+    from . import importar  # noqa: F401  (registra Admin → <entidad> → Importar CSV en bp_admin)
     from .vistas_auth import bp as bp_auth
     from .vistas_red import bp_almacen, bp_planta, bp_tienda
     for bp in (bp_auth, bp_admin, bp_tienda, bp_planta, bp_almacen):
@@ -98,6 +100,13 @@ def init_app(app):
 
     app.before_request(_comprobar_csrf)
     # (los pedidos automáticos diarios ya no se generan: la app trabaja con los kg/semana de cada tienda, sin semanas)
+
+    @app.errorhandler(413)
+    def _demasiado_grande(e):
+        if request.path.endswith("/importar"):
+            flash("El fichero es demasiado grande (máximo 1 MB): pártelo en varios.", "error")
+            return redirect(request.path)
+        return _error(e)
 
     @app.errorhandler(400)
     @app.errorhandler(403)
@@ -107,7 +116,7 @@ def init_app(app):
         from flask import render_template
         from werkzeug.exceptions import HTTPException
         codigo = e.code if isinstance(e, HTTPException) else 500
-        textos = {400: "Petición no válida", 403: "No tienes permiso para ver esta página",
+        textos = {400: "Petición no válida", 403: "No tienes permiso para ver esta página", 413: "Envío demasiado grande",
                   404: "No encontrado", 500: "Error interno"}
         detalle = e.description if isinstance(e, HTTPException) and codigo == 400 else ""
         return render_template("gestion/error.html", codigo=codigo, titulo=textos.get(codigo, "Error"),
