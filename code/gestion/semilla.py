@@ -205,10 +205,13 @@ def crear_usuarios():
 
 
 def sembrar(log=print):
-    if os.environ.get("MODARE_ENV", "").lower() in ("produccion", "producción", "production") and (
-            "MODARE_PASSWORD_ADMIN" not in os.environ or "MODARE_PASSWORD_INICIAL" not in os.environ):
-        raise RuntimeError("En producción, la carga inicial necesita MODARE_PASSWORD_ADMIN y MODARE_PASSWORD_INICIAL "
-                           "(no se crean usuarios con las contraseñas de ejemplo).")
+    from modare.bd import url_bd
+    real = (os.environ.get("MODARE_ENV", "").lower() in ("produccion", "producción", "production")
+            or not url_bd().startswith("sqlite"))        # una base PostgreSQL es una base de verdad
+    faltan = [v for v in ("MODARE_PASSWORD_ADMIN", "MODARE_PASSWORD_INICIAL") if not os.environ.get(v)]
+    if real and faltan:
+        raise RuntimeError(f"Faltan {' y '.join(faltan)}: en una base real (PostgreSQL o producción) no se crean usuarios "
+                           "con las contraseñas de ejemplo. Defínelas con export en ESTA terminal y repite el comando.")
     rng = random.Random(2026)
     crear_categorias()
     crear_red(rng)
