@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "gestion/_m.html" import icono, cabecera with context %}
+{% block title %}Alta de {{ e.singular }} · ReMode Studio{% endblock %}
+{% block body %}
+<p class="mb0"><a href="{{ url_for('admin.lista', ent=ent) }}">{{ icono('arrow-left') }} {{ e.titulo }}</a></p>
+{% call cabecera(obj.nombre or obj.id, e.singular|capitalize ~ ' · ' ~ obj.id ~ ' · alta hecha') %}
+  {% if e.enlace %}<a class="btn sec" href="{{ e.enlace(obj) }}">Ver panel {{ icono('arrow-right') }}</a>{% endif %}
+{% endcall %}
+<div class="alerta err">{{ icono('lock') }}<div><b>Apunta la contraseña ahora: no se volverá a mostrar</b> (solo se guarda su hash).
+  Se puede cambiar en «Mi cuenta».</div></div>
+<div class="card">
+  <h2>Usuario de acceso</h2>
+  <p>Usuario: <code>{{ usuario }}</code><br>Contraseña: <code id="pw">{{ password }}</code>
+    <button type="button" class="ghost sm" id="copiar">{{ icono('clipboard') }}Copiar</button></p>
+</div>
+<p><a class="btn" href="{{ url_for('admin.lista', ent=ent) }}">{{ icono('check') }}Hecho</a>
+   <a class="btn ghost" href="{{ url_for('admin.editar', ent=ent) }}">{{ icono('plus') }}Añadir otra</a></p>
+<script>
+  (function () {
+    let guardada = false;
+    const aviso = e => { if (!guardada) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", aviso);
+    document.getElementById("copiar").addEventListener("click", () => {
+      navigator.clipboard.writeText(document.getElementById("pw").textContent).then(() => { guardada = true; });
+    });
+    document.querySelectorAll("a.btn").forEach(a => a.addEventListener("click", () => { guardada = true; }));
+  })();
+</script>
+{% endblock %}

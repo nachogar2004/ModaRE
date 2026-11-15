@@ -1,14 +1,33 @@
 {% extends "base.html" %}
 {% from "gestion/_m.html" import csrf, icono, cabecera, vacio, estado, medidor with context %}
 {% block title %}{{ e.titulo }} · ReMode Studio{% endblock %}
+{% block head %}
+{% if ent in ('tiendas', 'plantas', 'almacenes') %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin="" defer></script>
+<script src="{{ url_for('static', filename='mapa_ubicacion.js') }}" defer></script>
+{% endif %}
+{% endblock %}
 {% block body %}
 {% call cabecera(e.titulo, eyebrow='Administración') %}
   {% if not e.solo_edicion %}
+  {% if ent in importables %}<a class="btn sec" href="{{ url_for('admin.importar_csv', ent=ent) }}">{{ icono('layers') }}Importar CSV</a>{% endif %}
   <a class="btn" href="{{ url_for('admin.editar', ent=ent) }}">{{ icono('plus') }}Añadir {{ e.singular }}</a>
   {% endif %}
 {% endcall %}
 {% if e.solo_edicion %}
 <p class="small">Datos que usa el optimizador de rutas: los cambios se aplican en la siguiente optimización. Se pueden editar, pero no añadir ni borrar.</p>
+{% endif %}
+
+{% if ent in ('tiendas', 'plantas', 'almacenes') %}
+<details class="card ubic">
+  <summary>{{ icono('map') }}Mapa de la red · clic para añadir {{ e.singular }} en un punto</summary>
+  <div id="lista-mapa" class="ubic-mapa lista" data-singular="{{ e.singular }}" data-url-instalaciones="{{ url_for('admin.geo_instalaciones') }}"
+       data-url-nuevo="{{ url_for('admin.editar', ent=ent) }}"></div>
+  <div class="ubic-leyenda"><span class="tienda"><i></i>Tiendas</span><span class="planta"><i></i>Plantas</span><span class="almacen"><i></i>Almacenes</span></div>
+</details>
 {% endif %}
 
 <div class="card flush">

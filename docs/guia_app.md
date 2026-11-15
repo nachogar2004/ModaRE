@@ -124,12 +124,61 @@ de cualquiera.
 | **Panel** | Indicadores, alertas, ocupación de plantas y almacenes; botón para generar pedidos automáticos. |
 | **Planificación** | Pedidos pendientes, cierre de lotes y sus rutas (ver §4). |
 | **Pedidos** | Todos los pedidos, con filtros por lote (o «pendientes de planificar»), estado, tipo y tienda. |
-| **Tiendas, Plantas, Almacenes** | Alta, edición, baja. Al dar de alta se crea su usuario con contraseña aleatoria (se muestra una vez). En los almacenes, también sus costes (fijo semanal y manipulación) y el tiempo de descarga; en las tiendas, si están en la muestra de pruebas y la planta que las sirve hoy. |
+| **Tiendas, Plantas, Almacenes** | Alta, edición, baja. Al dar de alta se crea su usuario con contraseña aleatoria (se muestra una vez, en la página del alta). Tiendas: *Importar CSV* para altas masivas. En los almacenes, también sus costes (fijo semanal y manipulación) y el tiempo de descarga; en las tiendas, si están en la muestra de pruebas y la planta que las sirve hoy. |
 | **Optimizador → Parámetros, Tipos de vehículo, Tarifas** | Los supuestos con los que calcula el optimizador (kg por palé, jornada, frecuencias, capacidades y emisiones de cada vehículo, €/km, €/h, €/día…). Se editan, no se añaden ni se borran; el cambio entra en la siguiente optimización. |
 | **Camiones troncal / reparto** | Flotas por separado: matrícula, tipo, capacidad, operador, conductor, estado, ITV, km. |
 | **Usuarios** | Crear, editar, desactivar; asignar rol y tienda/planta/almacén. |
 | **Movimientos** | Auditoría de cada cambio de stock: quién, cuándo, cuánto y por qué. |
 | **Optimizador avanzado** | Herramienta avanzada original (escenarios con demanda estimada, mapa y analítica). |
+
+**Alta y edición de tiendas, plantas y almacenes: ubicación en el mapa.** En la sección *Ubicación* del formulario
+hay un mapa (OpenStreetMap) para fijar el punto sin escribir coordenadas:
+
+- **Clic en el mapa** o **arrastrar el marcador** rellena latitud y longitud; si escribes las coordenadas, el marcador se mueve.
+- **Buscador de direcciones** (Enter o *Buscar*): elige un resultado y el mapa se centra ahí.
+- Al colocar el punto se rellenan dirección, municipio, provincia, comunidad y polígono **solo en los campos vacíos o
+  rellenados antes por el mapa**; lo que hayas escrito tú no se pisa. *Rellenar dirección desde el punto* lo fuerza.
+- Se dibujan las demás tiendas (azul), plantas (verde) y almacenes (dorado) y se indica el **almacén más cercano** en línea recta.
+- Plantas y almacenes solo en la **España peninsular**. Las **tiendas** también en **Baleares**: se gestionan en la plataforma,
+  pero se guardan siempre sin *Acceso por carretera* (el mapa desmarca la casilla y lo avisa; el servidor lo fuerza) y el
+  optimizador de rutas no las incluye (transporte marítimo). Canarias, Ceuta, Melilla y otros países se rechazan.
+- En la lista de cada una hay un mapa plegable: un clic en el mapa abre el alta con esas coordenadas.
+- Tras crear o mover una instalación, sus distancias usan línea recta × `factor_rodeo` hasta calcularlas en
+  *Planificación* → **Calcular distancias (OSRM)**.
+- Las direcciones vienen de Nominatim (OpenStreetMap) a través del servidor (1 consulta/s). Sin conexión el formulario
+  sigue funcionando con latitud y longitud a mano.
+
+**Importar tiendas desde CSV** (*Tiendas → Importar CSV*). Para dar de alta muchas tiendas a la vez:
+
+1. **Subir** un CSV con la misma estructura que `data/tiendas.csv` (botones *Plantilla CSV* y *Plantilla para Excel*: cabeceras y
+   una fila de ejemplo). Obligatorias: `nombre`, `municipio`, `provincia`, `lat`, `lon`, `categoria_tamano`; el resto toma los
+   valores por defecto de la carga inicial (L-V, 10:00–14:00, 30 min de descarga, sin límite de vehículo, pequeñas pedido mensual y
+   el resto semanal el jueves…). Sin ventas se usa la media de una tienda (`ventas_media_eur_tienda`, SINTÉTICO). `id_tienda` vacío
+   = siguiente TD-### libre, correlativo dentro del fichero. Se admiten también las columnas de la app (`frecuencia_pedido`,
+   `dia_pedido`, `dias_seguridad`, `pedido_auto_activo`, `capacidad_max_prendas`, `responsable`, `telefono`, `email`,
+   `ventas_anuales_eur`). Columnas desconocidas se ignoran (se avisa). Separador `,` o `;`, UTF-8 con o sin BOM (o Windows-1252,
+   con aviso), coma decimal; en cantidades (ventas, superficie, capacidad) también punto de miles (`140.000`, `1.234,5`; unas
+   ventas < 1.000 € se avisan); fechas AAAA-MM-DD o DD/MM/AAAA. Máximo 500 filas, 100 columnas y 1 MB. La provincia se ajusta a
+   la grafía de la base (sin tildes, alias como Vizcaya → Bizkaia, «Valencia/València»; también en el formulario) y se avisa
+   si no es de la red: la asignación del optimizador empareja provincias por nombre exacto.
+2. **Vista previa** (no guarda nada): cada fila con su estado. **Nueva** (marcada); **Ya existe**: mismo código (no se puede importar)
+   o *probable* (mismo nombre y municipio, misma dirección y municipio, o a menos de 50 m de una tienda de la base, con enlace a
+   ella: desmarcada, márcala si de verdad es otra tienda); **Repetida** dentro del fichero (mismos criterios; si repite el código no
+   se puede importar); **Error** con el motivo (las mismas reglas que el formulario: obligatorios, números, tamaño, vehículo, horas
+   HH:MM, días L-V/M-V, código TD-###, rangos —ventas y superficie ≥ 0, descarga 1–600 min, seguridad 0–60 días, día de pedido
+   0–6 semanal / 1–28 mensual—, ubicación fuera de la península y Baleares…). Avisos que no impiden importar: ventas de la media,
+   provincia desconocida, tienda insular, sin `vehiculo_max` (= puede llegar hasta un R18). Filtros *todas / nuevas / con aviso
+   / errores*, *Marcar nuevas* / *Ninguna* y contador de marcadas.
+3. **Importar las marcadas**: el servidor vuelve a validar todo y guarda **todas o ninguna**. Si alguna fila marcada ha cambiado de
+   estado o de coincidencias desde la vista previa (otro admin importó lo mismo, o se reenvía el formulario ya importado) no se
+   guarda nada y se enseña la vista previa actualizada. Cada tienda se crea como en la carga
+   inicial: capacidad, stock inicial ≈ 4 días de venta y, si se deja marcado, **4 semanas de ventas estimadas (SINTÉTICO)**: el
+   pedido automático usa la venta media de las últimas 4 semanas y, sin historial, una tienda nueva no pediría nada hasta pasado un
+   mes. Las ventas simuladas quedan marcadas como sintéticas y salen solas de la media en 4 semanas. Desmárcalo si prefieres
+   empezar sin historial (habrá que hacer pedidos adicionales al principio).
+4. **Resultado**: los usuarios creados con su contraseña aleatoria, que **se muestran una sola vez** (descargables en CSV; solo se
+   guarda su hash; descarga o *Copiar*, y el navegador avisa al salir antes de hacerlo). Recargar o reenviar no importa otra vez. Después: *Planificación* → **Calcular distancias (OSRM)** para
+   las tiendas nuevas.
 
 **Eliminar**: si el elemento no tiene historial se borra; si lo tiene (ventas, pedidos, viajes,
 movimientos…) se **da de baja** y se conserva el histórico. Los dados de baja se ven con
