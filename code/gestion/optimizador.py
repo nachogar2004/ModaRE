@@ -11,6 +11,7 @@ Los pedidos de la semana ya los ha volcado `logistica.cerrar_semana` a la tabla 
 """
 from __future__ import annotations
 
+import os
 import threading
 import traceback
 from collections import defaultdict
@@ -111,21 +112,26 @@ def exportar_vetos():
 
 
 # ----------------------------------------------------------------------------- 2. ejecutar
+# MODARE_OPTIMIZADOR=externo (en el servidor publicado): la web NO optimiza; deja la petición en cola y la
+# resuelve el «ordenador optimizador» (code/trabajador.py), que comparte la base de datos.
+EXTERNO = os.environ.get("MODARE_OPTIMIZADOR", "local").lower() == "externo"
+
+
 def lanzar(app, semana: str, *, segundos: int = 30, asignacion: str = "optimo", precio_co2: float = 0.0,
            plantas_futuras: bool = False) -> bool:
-    """Exporta los maestros y lanza la optimización en un hilo. Al terminar importa el plan."""
+    """Pide la optimización de la semana. False si ya hay una en marcha o en cola."""
+    params = {"segundos": segundos, "asignacion": asignacion, "precio_co2": precio_co2,
+              "plantas_futuras": plantas_futuras}
+    if EXTERNO:
+        return BD.encolar_trabajo(semana, params)
     # el estado vive en la base de datos: lo ve cualquier proceso del servidor y sobrevive a un reinicio
     if not BD.reclamar_trabajo(semana):
         return False
-    exportar_maestros()
 
     def _run():
-        from modare.planificador import planificar
         try:
-            planificar(semana, fuente="pedidos", asignacion=asignacion, segundos=segundos, precio_co2=precio_co2,
-                       plantas_futuras=plantas_futuras, log=lambda *a: None)
             with app.app_context():
-                res = importar_plan(semana)
+                res = ejecutar(semana, **params)
             BD.poner_trabajo(semana, "ok", res)
         except Exception as e:  # noqa: BLE001 — se enseña en la web
             traceback.print_exc()
@@ -133,6 +139,16 @@ def lanzar(app, semana: str, *, segundos: int = 30, asignacion: str = "optimo", 
 
     threading.Thread(target=_run, daemon=True).start()
     return True
+
+
+def ejecutar(semana: str, *, segundos: int = 30, asignacion: str = "optimo", precio_co2: float = 0.0,
+             plantas_futuras: bool = False, log=lambda *a: None) -> str:
+    """Optimiza la semana e importa el plan (necesita contexto de app). Lo usan la web y el trabajador."""
+    from modare.planificador import planificar
+    exportar_maestros()
+    planificar(semana, fuente="pedidos", asignacion=asignacion, segundos=segundos, precio_co2=precio_co2,
+               plantas_futuras=plantas_futuras, log=log)
+    return importar_plan(semana)
 
 
 # ----------------------------------------------------------------------------- 3. importar

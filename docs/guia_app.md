@@ -286,7 +286,7 @@ las migraciones de `code/migrations/`.
 | `ajustes` | estado interno (semanas cerradas, último día de pedidos automáticos) |
 | `pedidos_optimizador` | (librería) pedido semanal de cada tienda en kg y cajas: la entrada del optimizador |
 | `planes` | (librería) el plan de cada semana en JSON |
-| `trabajos_optimizacion` | (librería) estado de cada optimización; una «calculando» de más de 60 min se da por interrumpida |
+| `trabajos_optimizacion` | (librería) estado de cada optimización y cola del ordenador optimizador (fila `latido` = está conectado); una «calculando» de más de 60 min se da por interrumpida |
 | `alembic_version` | versión del esquema (migraciones) |
 
 Código: `gestion/vistas_*.py` (pantallas), `gestion/logistica.py` (reglas de negocio),
@@ -365,6 +365,7 @@ La app crea las tablas sola en el primer arranque.
 | `MODARE_PASSWORD_ADMIN`, `MODARE_PASSWORD_INICIAL` | sí, solo en la primera carga | contraseña del admin y contraseña inicial del resto de usuarios |
 | `MODARE_AUTO_MIGRAR` | `0` si hay varios procesos | `1` = migra al arrancar |
 | `MODARE_PROXY` | `1` (defecto) | la app está detrás de un proxy HTTPS |
+| `MODARE_OPTIMIZADOR` | `externo` en servidores pequeños | las rutas las calcula `trabajador.py` en otro ordenador (ver abajo) |
 
 Sin `MODARE_SECRET_KEY` o sin `MODARE_DB`, en producción la app **se niega a arrancar**.
 
@@ -380,6 +381,22 @@ gunicorn -w 2 -b 0.0.0.0:8000 --timeout 120 app:app     # Windows: waitress-serv
 
 Delante, un proxy con HTTPS (nginx, Caddy o el que dé el proveedor). La optimización tarda 1–2 min y corre en
 segundo plano, así que el `--timeout` solo afecta a las peticiones normales.
+
+### Calcular las rutas en otro ordenador (servidor pequeño o gratuito)
+
+Optimizar necesita potencia. Si la web está en un servidor modesto (p. ej. el plan gratuito de Render), las rutas
+se calculan en un ordenador potente que comparte la base de datos:
+
+1. En el servidor: `MODARE_OPTIMIZADOR=externo`. El botón **Optimizar** de *Planificación* ya no calcula: deja la
+   petición **en cola**, y la página muestra si el «ordenador optimizador» está conectado.
+2. En el ordenador potente (con el repositorio y el entorno instalados):
+   ```bash
+   cd code
+   export MODARE_DB='postgresql://…'      # la misma base que la web
+   .venv/bin/python trabajador.py         # Windows: .venv\Scripts\python trabajador.py
+   ```
+   Déjalo abierto: recoge las peticiones, optimiza con toda su potencia y guarda las rutas en la base; la web se
+   actualiza sola. Ctrl + C para pararlo. Si está apagado, las peticiones esperan en cola hasta que se conecte.
 
 ### Cambiar el esquema (añadir un campo, una tabla…)
 

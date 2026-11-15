@@ -558,7 +558,8 @@ def planificacion():
         sem_actual=L.semana_entrega_para(dt.date.today()),
         kg=round(sum(p.kg for p in peds), 1), cajas=sum(p.cajas for p in peds),
         tiendas=len({p.tienda_id for p in peds}), cerrada=L.semana_cerrada(semana), viajes=viajes, reps=reps,
-        plan=cargar_plan(semana), trabajo=BD.estado_trabajo(semana), flota_t=flota_t, flota_r=flota_r)
+        plan=cargar_plan(semana), trabajo=BD.estado_trabajo(semana), flota_t=flota_t, flota_r=flota_r,
+        externo=OPT.EXTERNO, trabajador=BD.trabajador_conectado() if OPT.EXTERNO else None)
 
 
 @bp.post("/planificacion/cerrar")

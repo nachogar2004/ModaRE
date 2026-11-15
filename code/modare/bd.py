@@ -43,10 +43,14 @@ planes = sa.Table(
 trabajos = sa.Table(
     "trabajos_optimizacion", metadata,
     sa.Column("semana", sa.String(8), primary_key=True),
-    sa.Column("estado", sa.String(12), nullable=False),          # calculando / ok / error
+    sa.Column("estado", sa.String(12), nullable=False),          # pendiente / calculando / ok / error
     sa.Column("mensaje", sa.Text),
     sa.Column("actualizado", sa.DateTime, nullable=False),
+    sa.Column("parametros", sa.Text),                            # JSON con las opciones (cola del trabajador externo)
 )
+LATIDO = "latido"            # fila especial: el ordenador optimizador (trabajador.py) avisa de que está conectado
+SEG_LATIDO = 20              # el trabajador escribe su latido cada 20 s
+MAX_MIN_PENDIENTE = 10       # una petición en cola más antigua sin trabajador conectado se avisa en la web
 
 MAX_MIN_CALCULANDO = 60     # una optimización «calculando» más antigua se da por interrumpida (en un servidor lento tarda ~20 min)
 
@@ -100,25 +104,69 @@ def cargar_plan(semana: str) -> dict | None:
 
 
 # ----------------------------------------------------------------------------- estado de las optimizaciones
-def poner_trabajo(semana: str, estado: str, mensaje: str | None = None):
+def poner_trabajo(semana: str, estado: str, mensaje: str | None = None, parametros: dict | None = None):
     with engine().begin() as con:
-        _upsert(con, trabajos, {"semana": semana, "estado": estado, "mensaje": mensaje, "actualizado": ahora()}, ["semana"])
+        _upsert(con, trabajos, {"semana": semana, "estado": estado, "mensaje": mensaje, "actualizado": ahora(),
+                                "parametros": json.dumps(parametros) if parametros is not None else None}, ["semana"])
 
 
 def estado_trabajo(semana: str) -> dict:
-    """{} si nunca se ha optimizado; {"estado", "msg"} si no."""
+    """{} si nunca se ha optimizado; {"estado", "msg"} si no.
+    estado: pendiente (en cola para el ordenador optimizador) / calculando / ok / error"""
     with engine().connect() as con:
         r = con.execute(sa.select(trabajos).where(trabajos.c.semana == semana)).mappings().first()
     if not r:
         return {}
-    if r["estado"] == "calculando" and ahora() - r["actualizado"] > dt.timedelta(minutes=MAX_MIN_CALCULANDO):
-        return {"estado": "error", "msg": "La optimización se interrumpió (¿se reinició el servidor?). Vuelve a lanzarla."}
+    edad = ahora() - r["actualizado"]
+    if r["estado"] == "calculando" and edad > dt.timedelta(minutes=MAX_MIN_CALCULANDO):
+        return {"estado": "error", "msg": "La optimización se interrumpió (¿se reinició el servidor o el ordenador "
+                                          "optimizador?). Vuelve a lanzarla."}
+    if r["estado"] == "pendiente" and edad > dt.timedelta(minutes=MAX_MIN_PENDIENTE) and not trabajador_conectado():
+        return {"estado": "pendiente", "msg": "Sigue en cola: el ordenador optimizador no está conectado."}
     return {"estado": r["estado"], "msg": r["mensaje"]}
 
 
+def _ocupado(semana: str) -> bool:
+    return estado_trabajo(semana).get("estado") in ("calculando", "pendiente")
+
+
 def reclamar_trabajo(semana: str) -> bool:
-    """Marca la semana como «calculando» si no lo estaba ya. False si otra optimización sigue en marcha."""
-    if estado_trabajo(semana).get("estado") == "calculando":
+    """Optimizar AQUÍ: marca la semana como «calculando». False si ya hay una optimización en marcha o en cola."""
+    if _ocupado(semana):
         return False
     poner_trabajo(semana, "calculando")
     return True
+
+
+# ----------------------------------------------------------------------------- cola para el ordenador optimizador
+def encolar_trabajo(semana: str, parametros: dict) -> bool:
+    """Optimizar en el ORDENADOR OPTIMIZADOR (trabajador.py): deja la petición en cola. False si ya hay una."""
+    if _ocupado(semana):
+        return False
+    poner_trabajo(semana, "pendiente", "En cola: esperando al ordenador optimizador.", parametros)
+    return True
+
+
+def tomar_pendiente() -> tuple[str, dict] | None:
+    """El trabajador toma la petición más antigua de la cola. El UPDATE condicionado evita que dos trabajadores
+    cojan la misma."""
+    with engine().begin() as con:
+        filas = con.execute(sa.select(trabajos.c.semana, trabajos.c.parametros)
+                            .where(trabajos.c.estado == "pendiente").order_by(trabajos.c.actualizado)).all()
+        for semana, params in filas:
+            r = con.execute(sa.update(trabajos).where(trabajos.c.semana == semana, trabajos.c.estado == "pendiente")
+                            .values(estado="calculando", mensaje="Calculando en el ordenador optimizador…",
+                                    actualizado=ahora()))
+            if r.rowcount == 1:
+                return semana, json.loads(params or "{}")
+    return None
+
+
+def latido():
+    poner_trabajo(LATIDO, "vivo")
+
+
+def trabajador_conectado() -> bool:
+    with engine().connect() as con:
+        t = con.execute(sa.select(trabajos.c.actualizado).where(trabajos.c.semana == LATIDO)).scalar()
+    return bool(t) and ahora() - t < dt.timedelta(seconds=3 * SEG_LATIDO)

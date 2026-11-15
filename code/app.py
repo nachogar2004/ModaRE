@@ -100,6 +100,10 @@ def _lanzar(semana, kw):
 @rol_requerido()
 def optimizar():
     semana = _sem(request.form.get("semana"))
+    from gestion.optimizador import EXTERNO
+    if EXTERNO:   # en la web publicada no se calcula aquí: lo hace el ordenador optimizador desde Planificación
+        flash("En esta web las rutas se calculan en el ordenador optimizador: usa Planificación → Optimizar.", "error")
+        return redirect(url_for("admin.planificacion", semana=semana))
     if not BD.reclamar_trabajo(semana):
         flash("Ya hay una optimización en marcha para esta semana.")
         return redirect(url_for("central", semana=semana))

@@ -2,7 +2,7 @@
 {% from "gestion/_m.html" import csrf, icono, cabecera, kpi, vacio, estado, lineas with context %}
 {% block title %}Planificación {{ semana }} · ReMode Studio{% endblock %}
 {% block body %}
-{% set calculando = trabajo and trabajo.estado == 'calculando' %}
+{% set calculando = trabajo and trabajo.estado in ('calculando', 'pendiente') %}
 {% call cabecera('Planificación · ' ~ semana, 'Próxima semana de entrega: las tiendas están pidiendo para ella' if semana == sem_actual else None, eyebrow='Operación') %}
   <a class="btn ghost" href="{{ url_for('admin.planificacion', semana=sem_ant) }}">{{ icono('arrow-left') }}{{ sem_ant }}</a>
   <form method="get" class="tools" style="margin:0"><input name="semana" value="{{ semana }}" pattern="\d{4}-W\d{2}" style="width:110px" aria-label="Semana"></form>
@@ -45,13 +45,26 @@
 
 {# ------------------------------------------------------------------ 2 · optimizar #}
 <div class="card">
-  <div class="card-head"><h2>2 · Optimizar rutas</h2><span class="small">planta → almacén → tienda</span></div>
+  <div class="card-head"><h2>2 · Optimizar rutas</h2>
+    {% if externo %}
+      {% if trabajador %}<span class="pill disponible">Ordenador optimizador conectado</span>
+      {% else %}<span class="pill baja">Ordenador optimizador desconectado</span>{% endif %}
+    {% else %}<span class="small">planta → almacén → tienda</span>{% endif %}
+  </div>
+  {% if externo and not trabajador %}
+    <div class="alerta">{{ icono('info') }}<div>Las rutas se calculan en el <b>ordenador optimizador</b>, que ahora no está conectado.
+      Para conectarlo, en ese ordenador: <code>cd code</code> · <code>export MODARE_DB='…'</code> · <code>.venv/bin/python trabajador.py</code>.
+      Puedes pedir la optimización igualmente: quedará en cola hasta que se conecte.</div></div>
+  {% endif %}
   {% if calculando %}
-    <div class="alerta info" id="estado">{{ icono('refresh') }}<div><b>Calculando rutas…</b> Suele tardar 1–2 minutos. La página se actualizará sola.</div></div>
+    <div class="alerta info" id="estado">{{ icono('refresh') }}<div>
+      {% if trabajo.estado == 'pendiente' %}<b>En cola.</b> {{ trabajo.msg or 'Esperando al ordenador optimizador.' }}
+      {% else %}<b>Calculando rutas…</b> {{ trabajo.msg or '' }}{% endif %}
+      La página se actualizará sola al terminar.</div></div>
     <script>
       setInterval(async () => {
         try { const j = await (await fetch("{{ url_for('admin.estado', semana=semana) }}")).json();
-              if (j.estado !== 'calculando') location.reload(); } catch (e) {}
+              if (j.estado !== '{{ trabajo.estado }}') location.reload(); } catch (e) {}
       }, 4000);
     </script>
   {% elif trabajo and trabajo.estado == 'error' %}
