@@ -133,6 +133,11 @@ def _importar_pedidos_db_antiguo(log):
     nuevas = [r for r in filas if (r[0], r[1]) not in ya]
     for semana, tienda, cajas, kg, coment in nuevas:
         PED.guardar(semana, tienda, cajas, kg, coment or "")
-    f.rename(f.with_name("pedidos.db.migrado"))
+    destino = f.with_name(f"{f.name}.migrado")
+    n = 1
+    while destino.exists():          # ya se migró antes (en Windows rename falla si el destino existe)
+        n += 1
+        destino = f.with_name(f"{f.name}.migrado{n}")
+    f.rename(destino)
     log(f"Pedidos del optimizador copiados desde {f.name} a la base común ({len(nuevas)} filas); "
-        f"el fichero antiguo queda como {f.name}.migrado.")
+        f"el fichero antiguo queda como {destino.name}.")

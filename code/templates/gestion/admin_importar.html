@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% from "gestion/_m.html" import csrf, icono, cabecera, kpi with context %}
+{% block title %}Importar {{ e.titulo|lower }} · ReMode Studio{% endblock %}
+{% block body %}
+<p class="mb0"><a href="{{ url_for('admin.lista', ent=ent) }}">{{ icono('arrow-left') }} {{ e.titulo }}</a></p>
+{% set pasos = {'subir': '1 · Subir el fichero', 'previa': '2 · Vista previa (aún no se ha guardado nada)', 'hecho': '3 · Importación terminada'} %}
+{% call cabecera('Importar ' ~ e.titulo|lower ~ ' desde CSV', pasos[paso], eyebrow='Administración') %}
+  {% if paso != 'hecho' %}
+  <a class="btn ghost" href="{{ url_for('admin.importar_plantilla', ent=ent) }}">{{ icono('download') }}Plantilla CSV</a>
+  <a class="btn ghost" href="{{ url_for('admin.importar_plantilla', ent=ent, excel=1) }}">{{ icono('download') }}Plantilla para Excel (;)</a>
+  {% endif %}
+{% endcall %}
+
+{% if paso == 'subir' %}
+<div class="card">
+  <h2>Formato</h2>
+  <p>La misma estructura que <code>data/{{ ent }}.csv</code> (descarga la plantilla: cabeceras y una fila de ejemplo).
+    Obligatorias: {% for c in imp.obligatorias %}<code>{{ c }}</code>{{ ', ' if not loop.last }}{% endfor %}.
+    El resto es opcional y toma los mismos valores por defecto que la carga inicial.</p>
+  <ul class="small">
+    <li><code>id_tienda</code> vacío = siguiente código libre (TD-###), correlativo dentro del fichero.</li>
+    <li>Separador <code>,</code> o <code>;</code> (Excel en español), UTF-8 con o sin BOM, coma o punto decimal (las cantidades admiten punto de miles: 140.000),
+      horas HH:MM, fechas AAAA-MM-DD o DD/MM/AAAA.</li>
+    <li>También se aceptan las columnas de la app: {% for c in imp.extra %}<code>{{ c }}</code>{{ ', ' if not loop.last }}{% endfor %}. Las demás columnas se ignoran (se avisa).</li>
+    <li>Máximo {{ max_filas }} filas y {{ (limite / 1000000)|round(1) }} MB. España peninsular y Baleares (las tiendas de Baleares quedan fuera de las rutas).</li>
+  </ul>
+  <form method="post" enctype="multipart/form-data" class="mt">{{ csrf() }}
+    <input type="file" name="fichero" accept=".csv,text/csv" required aria-label="Fichero CSV">
+    <button>{{ icono('search') }}Ver vista previa</button>
+  </form>
+</div>
+
+{% elif paso == 'previa' %}
+{% set r = a.resumen %}
+{% set n_aviso = a.filas|selectattr('estado', 'ne', 'error')|selectattr('avisos')|list|length %}
+<div class="kpis">
+  {{ kpi(r.nueva, 'nuevas', 'plus', 'ok') }}
+  {{ kpi(r.existe, 'ya existen', 'store') }}
+  {{ kpi(r.repetida, 'repetidas en el fichero', 'layers', 'warn') }}
+  {{ kpi(r.error, 'con errores', 'alert', 'err' if r.error else '') }}
+</div>
+{% if aviso_extra %}<div class="alerta err">{{ icono('alert') }}<div>{{ aviso_extra }}</div></div>{% endif %}
+{% for av in a.avisos %}<div class="alerta">{{ icono('alert') }}<div>{{ av }}</div></div>{% endfor %}
+{% if a.ignoradas %}<div class="alerta">{{ icono('alert') }}<div>Columnas desconocidas, se ignoran: {{ a.ignoradas|join(', ') }}.</div></div>{% endif %}
+{% if a.no_guardadas %}<div class="alerta info">{{ icono('info') }}<div>No se guardan en la base (etiquetas y fuentes del CSV de datos): {{ a.no_guardadas|join(', ') }}.</div></div>{% endif %}
+
+<form method="post" action="{{ url_for('admin.importar_confirmar', ent=ent) }}" id="imp-form">{{ csrf() }}
+  <input type="hidden" name="datos" value="{{ datos }}">
+  <div class="card imp-card">
+    <div class="imp-herr">
+      <div class="imp-filtros" role="group" aria-label="Filtrar filas">
+        <button type="button" class="sec sm" data-filtro="" aria-pressed="true">Todas ({{ a.filas|length }})</button>
+        <button type="button" class="ghost sm" data-filtro="nueva" aria-pressed="false">Nuevas ({{ r.nueva }})</button>
+        <button type="button" class="ghost sm" data-filtro="aviso" aria-pressed="false">Con aviso ({{ n_aviso }})</button>
+        <button type="button" class="ghost sm" data-filtro="error" aria-pressed="false">Errores ({{ r.error }})</button>
+      </div>
+      <div class="actions">
+        <button type="button" class="ghost sm" data-marcar="nuevas">Marcar nuevas</button>
+        <button type="button" class="ghost sm" data-marcar="ninguna">Ninguna</button>
+      </div>
+    </div>
+    <p class="small mb0">Marcadas por defecto las nuevas. Las coincidencias probables puedes marcarlas si de verdad son otra {{ e.singular }};
+      las que tienen el mismo código que una existente, las que repiten código y las que tienen errores no se pueden importar.</p>
+    <table class="imp-tabla mt">
+      <thead><tr><th><span class="sr-only">Importar</span></th><th>Línea</th><th>Estado</th><th>Código</th><th>Nombre</th><th>Municipio</th><th>Provincia</th><th>Tamaño</th><th>Detalle</th></tr></thead>
+      <tbody>
+      {% for f in a.filas %}
+      {% set con_aviso = f.estado != 'error' and f.avisos %}
+      <tr data-estado="{{ f.estado }}" {% if con_aviso %}data-aviso="1"{% endif %}>
+        <td>{% if f.seleccionable %}<input type="checkbox" name="fila" value="{{ f.n }}" {{ 'checked' if f.marcada }} data-nueva="{{ 1 if f.estado == 'nueva' else 0 }}" aria-label="Importar la línea {{ f.n }}">{% endif %}</td>
+        <td class="n" data-l="Línea">{{ f.n }}</td>
+        <td class="nowrap"><span class="pill {{ {'nueva': 'entregado', 'existe': 'plain', 'probable': 'pendiente', 'repetida': 'adicional', 'error': 'cancelado'}[f.estado] }}">{{ ESTADOS[f.estado] }}</span></td>
+        <td class="nowrap" data-l="Código">{{ f.obj.id if f.obj and f.obj.id else (f.datos.get('id_tienda') or '') }}{% if f.obj and not f.obj.id %}<span class="muted">automático</span>{% endif %}</td>
+        <td data-l="Nombre"><b>{{ f.datos.get('nombre', '') }}</b></td>
+        <td data-l="Municipio">{{ f.datos.get('municipio', '') }}</td>
+        <td data-l="Provincia">{{ f.obj.provincia if f.obj else f.datos.get('provincia', '') }}</td>
+        <td data-l="Tamaño">{{ f.obj.categoria_tamano if f.obj else f.datos.get('categoria_tamano', '') }}</td>
+        <td class="small imp-detalle">
+          {% if f.estado == 'error' %}<span class="err">{{ f.motivo }}</span>{% else %}{{ f.motivo }}{% endif %}
+          {% for oid, nombre, porque in f.coincide %}
+            <div>{{ 'Coincide con' if loop.first }} <a href="{{ url_for('admin.editar', ent=ent, oid=oid) }}">{{ oid }} · {{ nombre }}</a> ({{ porque }})</div>
+          {% endfor %}
+          {% if con_aviso %}{% for av in f.avisos %}<div class="warn">{{ av }}</div>{% endfor %}{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card imp-barra">
+    <span class="imp-cuenta"><b id="n-marcadas">0</b> marcadas de {{ a.filas|length }}</span>
+    <label class="check" title="El pedido automático usa la venta media de las 4 últimas semanas: sin historial no pediría nada durante un mes">
+      <input type="checkbox" name="ventas" checked> Ventas estimadas de 4 semanas (SINTÉTICO)</label>
+    <button>{{ icono('check') }}Importar las marcadas</button>
+  </div>
+  <p class="small">Se guardan todas las marcadas o ninguna. Cada {{ e.singular }} recibe su usuario con contraseña aleatoria.
+    <a href="{{ url_for('admin.importar_csv', ent=ent) }}">Subir otro fichero</a>.</p>
+</form>
+<script>
+  (function () {
+    const form = document.getElementById("imp-form"), filas = [...form.querySelectorAll("tbody tr")];
+    const casillas = [...form.querySelectorAll('input[name="fila"]')], cuenta = document.getElementById("n-marcadas");
+    const contar = () => { cuenta.textContent = casillas.filter(c => c.checked).length; };
+    casillas.forEach(c => c.addEventListener("change", contar)); contar();
+    form.querySelectorAll("[data-marcar]").forEach(b => b.addEventListener("click", () => {
+      casillas.forEach(c => { c.checked = b.dataset.marcar === "nuevas" && c.dataset.nueva === "1"; }); contar();
+    }));
+    form.querySelectorAll("[data-filtro]").forEach(b => b.addEventListener("click", () => {
+      const f = b.dataset.filtro;
+      form.querySelectorAll("[data-filtro]").forEach(o => { const on = o === b; o.setAttribute("aria-pressed", on); o.classList.toggle("sec", on); o.classList.toggle("ghost", !on); });
+      filas.forEach(tr => { tr.hidden = !!f && (f === "aviso" ? !tr.dataset.aviso : tr.dataset.estado !== f); });
+    }));
+  })();
+</script>
+
+{% else %}
+<div class="alerta">{{ icono('alert') }}<div>Las distancias de las {{ creadas|length }} ubicaciones nuevas usan línea recta × factor_rodeo hasta
+  exportar a la librería de rutas y regenerar <code>data/distancias.csv</code> con <code>python calcular_distancias.py</code>.</div></div>
+<div class="alerta err">{{ icono('lock') }}<div><b>Descarga o copia las contraseñas ahora: no se volverán a mostrar</b> (solo se guarda su hash).
+  Cada usuario puede cambiarla en «Mi cuenta».</div></div>
+<div class="card">
+  <h2>{{ creadas|length }} {{ e.titulo|lower }} importadas</h2>
+  <div class="actions mt">
+    <a class="btn imp-descarga" id="descargar" href="{{ descarga }}" download="usuarios_{{ ent }}.csv">{{ icono('download') }}Descargar usuarios y contraseñas (CSV)</a>
+    <button type="button" class="sec" id="copiar">{{ icono('clipboard') }}Copiar</button>
+    <span class="small" id="copiado" aria-live="polite"></span>
+  </div>
+  <table class="imp-tabla mt" id="t-creadas">
+    <thead><tr><th>Código</th><th>Nombre</th><th>Municipio</th><th>Usuario</th><th>Contraseña</th></tr></thead>
+    <tbody>
+    {% for c in creadas %}
+    <tr><td class="nowrap" data-l="Código"><a href="{{ url_for('admin.editar', ent=ent, oid=c.id) }}"><b>{{ c.id }}</b></a></td><td data-l="Nombre">{{ c.nombre }}</td>
+      <td data-l="Municipio">{{ c.municipio }}</td><td data-l="Usuario"><code>{{ c.usuario }}</code></td><td data-l="Contraseña"><code>{{ c.password }}</code></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+<p><a class="btn sec" href="{{ url_for('admin.lista', ent=ent) }}">{{ icono('arrow-left') }}Volver a {{ e.titulo|lower }}</a></p>
+<script>
+  (function () {
+    let guardadas = false;           // aviso al salir mientras no se hayan descargado o copiado
+    window.addEventListener("beforeunload", e => { if (!guardadas) { e.preventDefault(); e.returnValue = ""; } });
+    document.getElementById("descargar").addEventListener("click", () => { guardadas = true; });
+    document.getElementById("copiar").addEventListener("click", () => {
+      const txt = [...document.querySelectorAll("#t-creadas tr")].map(tr => [...tr.cells].map(td => td.textContent.trim()).join("\t")).join("\n");
+      navigator.clipboard.writeText(txt).then(() => { guardadas = true; document.getElementById("copiado").textContent = "Copiado al portapapeles."; },
+        () => { document.getElementById("copiado").textContent = "No se pudo copiar: selecciona la tabla a mano."; });
+    });
+  })();
+</script>
+{% endif %}
+{% endblock %}

@@ -404,3 +404,49 @@ table.grid .cero { color: var(--err); font-weight: 600; }
 .right { margin-left: auto; }
 .divider { height: 0; border-top: 1.5px dashed var(--line-2); margin: 16px 0; }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ---------------------------------------------------------------- mapa de ubicación (Leaflet) */
+.ubic { margin-bottom: 18px; }
+.ubic-buscar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.ubic-buscar input { flex: 1 1 260px; max-width: none; }
+.ubic-res { list-style: none; margin: 0 0 10px; padding: 0; border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--surface); overflow: hidden; }
+.ubic-res:empty { display: none; }
+.ubic-res button { all: unset; box-sizing: border-box; display: block; width: 100%; cursor: pointer; padding: 8px 12px; font-size: 13.5px; color: var(--ink-2); border-bottom: 1px dashed var(--line); }
+.ubic-res li:last-child button { border-bottom: 0; }
+.ubic-res button:hover, .ubic-res button:focus-visible { background: var(--hover); color: var(--ink); }
+.ubic-res .vacio { padding: 8px 12px; font-size: 13.5px; color: var(--muted); }
+.ubic-mapa { height: 380px; border-radius: var(--radius-sm); border: 1px solid var(--line-2); background: var(--surface-2); z-index: 0; }
+.ubic-mapa.lista { height: 420px; }
+.ubic-leyenda { display: flex; flex-wrap: wrap; gap: 14px; margin: 8px 0 0; font-size: 12.5px; color: var(--muted); }
+.ubic-leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+.ubic-leyenda .tienda i { background: var(--denim); } .ubic-leyenda .planta i { background: var(--ok); } .ubic-leyenda .almacen i { background: var(--stitch); }
+.ubic-pie { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 8px; }
+.ubic-info { font-size: 13px; color: var(--ink-2); }
+.ubic .alerta { margin: 10px 0 0; }
+.ubic [hidden] { display: none !important; }
+
+/* ---------------------------------------------------------------- importación CSV (admin_importar.html) */
+/* un solo scroll (el de la página) con la cabecera de la tabla fija; en móvil cada fila es una ficha */
+.imp-card { overflow: visible; }
+.imp-herr { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.imp-filtros { display: flex; gap: 4px; flex-wrap: wrap; }
+.imp-tabla th { top: 0; }
+.imp-tabla .imp-detalle { min-width: 220px; }
+.imp-barra { position: sticky; bottom: 8px; z-index: 5; display: flex; gap: 8px 14px; align-items: center; flex-wrap: wrap;
+             padding: 8px 16px; margin-bottom: 8px; }
+.imp-barra .check { font-size: 13px; }
+.imp-cuenta { font-size: 13px; }
+.imp-descarga { white-space: normal; text-align: left; }
+@media (max-width: 900px) { .imp-tabla th { top: 51px; } }
+@media (max-width: 760px) {
+  .imp-tabla thead { display: none; }
+  .imp-tabla, .imp-tabla tbody, .imp-tabla tr, .imp-tabla td { display: block; width: 100%; }
+  .imp-tabla tr { border: 1px solid var(--line); border-radius: var(--radius-sm); margin-bottom: 8px; padding: 6px 10px; }
+  .imp-tabla tr[hidden] { display: none; }
+  .imp-tabla td { border: 0; padding: 2px 12px 2px 0 !important; display: inline-block; width: auto; text-align: left !important; }
+  .imp-tabla td[data-l]::before { content: attr(data-l) ": "; color: var(--muted); font-size: 12px; }
+  .imp-tabla td[data-l="Nombre"], .imp-tabla .imp-detalle { display: block; }
+  .imp-tabla td[data-l="Nombre"]::before { content: none; }
+  .imp-tabla .imp-detalle { min-width: 0; }
+}
+@media (max-width: 600px) { .imp-barra { position: static; } }
