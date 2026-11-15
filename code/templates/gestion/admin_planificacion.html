@@ -10,6 +10,14 @@
   {% if semana != sem_actual %}<a class="btn sec" href="{{ url_for('admin.planificacion', semana=sem_actual) }}">Próxima entrega</a>{% endif %}
 {% endcall %}
 
+<div class="card tools" style="padding:12px 16px">
+  <span class="small"><b>Semanas con pedidos:</b></span>
+  {% for s, por_estado in semanas_pedidos.items() %}
+    <a class="btn {{ '' if s == semana else 'sec' }} sm" href="{{ url_for('admin.planificacion', semana=s) }}">{{ s }}
+      · {{ por_estado.values()|sum }} pedido{{ 's' if por_estado.values()|sum != 1 }}{% if por_estado.get('pendiente') %} ({{ por_estado.pendiente }} pendiente{{ 's' if por_estado.pendiente != 1 }}){% endif %}</a>
+  {% else %}<span class="small">ninguna todavía. Los pedidos automáticos se generan el día que le toca a cada tienda (la mayoría, los jueves).</span>{% endfor %}
+</div>
+
 <div class="steps">
   <div class="step {{ 'hecho' if cerrada else 'actual' }}">Recibir pedidos</div>
   <div class="step {{ 'hecho' if cerrada else '' }}">Cerrar semana</div>

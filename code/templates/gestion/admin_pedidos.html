@@ -26,7 +26,7 @@
     {% for p in filas %}
     <tr><td class="nowrap"><b>{{ p.codigo }}</b>{% if p.urgente %} <span class="pill urgente plain">urgente</span>{% endif %}<span class="sub">{{ p.creado.strftime('%d/%m %H:%M') }}</span></td>
       <td><a href="{{ url_for('tienda.panel', tid=p.tienda_id) }}">{{ p.tienda.nombre }}</a><span class="sub">{{ p.tienda_id }} · {{ p.tienda.provincia }}</span></td>
-      <td>{{ tipo_pedido(p.tipo) }}</td><td class="nowrap">{{ p.semana_entrega }}</td><td>{{ estado(p.estado) }}</td>
+      <td>{{ tipo_pedido(p.tipo) }}</td><td class="nowrap"><a href="{{ url_for('admin.planificacion', semana=p.semana_entrega) }}" title="Planificar esta semana">{{ p.semana_entrega }}</a></td><td>{{ estado(p.estado) }}</td>
       <td class="n">{{ p.unidades|miles }}<span class="sub">{{ p.kg|miles(1) }} kg</span></td><td class="n">{{ p.cajas }}</td>
       <td class="nowrap">{{ p.almacen_id or '—' }}<span class="sub">{{ p.viaje.nombre if p.viaje else 'sin ruta' }}</span></td>
       <td class="small" style="max-width:300px">{{ lineas(p) }}{% if p.comentario %}<br><i>{{ p.comentario }}</i>{% endif %}</td></tr>

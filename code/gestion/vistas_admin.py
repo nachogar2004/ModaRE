@@ -552,10 +552,16 @@ def planificacion():
     for c in CamionReparto.query.filter(CamionReparto.estado != "baja"):
         flota_r.setdefault(c.almacen_id, []).append(c)
     lunes = L.lunes_de(semana)
+    # semanas que tienen pedidos activos (para saltar a ellas: la página abre por defecto la próxima entrega)
+    con_pedidos = (db.session.query(Pedido.semana_entrega, Pedido.estado, func.count())
+                   .filter(Pedido.estado.in_(L.ACTIVOS)).group_by(Pedido.semana_entrega, Pedido.estado).all())
+    semanas_pedidos: dict[str, dict] = {}
+    for sem_, est_, n_ in con_pedidos:
+        semanas_pedidos.setdefault(sem_, {})[est_] = n_
     return render_template(
         "gestion/admin_planificacion.html", semana=semana, peds=peds, resumen=resumen,
         sem_ant=L.semana_iso(lunes - dt.timedelta(days=7)), sem_sig=L.semana_iso(lunes + dt.timedelta(days=7)),
-        sem_actual=L.semana_entrega_para(dt.date.today()),
+        sem_actual=L.semana_entrega_para(dt.date.today()), semanas_pedidos=dict(sorted(semanas_pedidos.items())),
         kg=round(sum(p.kg for p in peds), 1), cajas=sum(p.cajas for p in peds),
         tiendas=len({p.tienda_id for p in peds}), cerrada=L.semana_cerrada(semana), viajes=viajes, reps=reps,
         plan=cargar_plan(semana), trabajo=BD.estado_trabajo(semana), flota_t=flota_t, flota_r=flota_r,
