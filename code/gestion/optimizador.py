@@ -18,12 +18,12 @@ from collections import defaultdict
 import pandas as pd
 
 from modare import config as C
+from modare import bd as BD
 from modare.planificador import cargar_plan
 
 from .modelos import (Almacen, CamionReparto, CamionTroncal, LineaReposicion, Pedido, Planta, Reposicion, Tienda,
                       Viaje, db)
 
-TRABAJOS: dict[str, dict] = {}       # semana -> {"estado": "calculando"|"ok"|"error", "msg": str}
 ETIQUETA_APP = "APP"                  # etiqueta de las filas creadas/editadas desde la app
 
 
@@ -114,10 +114,10 @@ def exportar_vetos():
 def lanzar(app, semana: str, *, segundos: int = 30, asignacion: str = "optimo", precio_co2: float = 0.0,
            plantas_futuras: bool = False) -> bool:
     """Exporta los maestros y lanza la optimización en un hilo. Al terminar importa el plan."""
-    if TRABAJOS.get(semana, {}).get("estado") == "calculando":
+    # el estado vive en la base de datos: lo ve cualquier proceso del servidor y sobrevive a un reinicio
+    if not BD.reclamar_trabajo(semana):
         return False
     exportar_maestros()
-    TRABAJOS[semana] = {"estado": "calculando"}
 
     def _run():
         from modare.planificador import planificar
@@ -126,10 +126,10 @@ def lanzar(app, semana: str, *, segundos: int = 30, asignacion: str = "optimo", 
                        plantas_futuras=plantas_futuras, log=lambda *a: None)
             with app.app_context():
                 res = importar_plan(semana)
-            TRABAJOS[semana] = {"estado": "ok", "msg": res}
+            BD.poner_trabajo(semana, "ok", res)
         except Exception as e:  # noqa: BLE001 — se enseña en la web
             traceback.print_exc()
-            TRABAJOS[semana] = {"estado": "error", "msg": str(e)}
+            BD.poner_trabajo(semana, "error", str(e))
 
     threading.Thread(target=_run, daemon=True).start()
     return True

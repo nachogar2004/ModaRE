@@ -192,7 +192,7 @@ def cancelar_pedido(p: Pedido):
 # ----------------------------------------------------------------------------- stock
 def _mov(entidad, entidad_id, delta, motivo, *, categoria=None, ref=None, usuario=None):
     db.session.add(MovimientoStock(entidad=entidad, entidad_id=entidad_id, categoria_id=categoria, delta=delta,
-                                   motivo=motivo, referencia=ref, usuario=usuario))
+                                   motivo=(motivo or "ajuste")[:40], referencia=ref, usuario=usuario))
 
 
 def _stock_tienda(t: Tienda, cat: str) -> StockTienda:
@@ -278,8 +278,7 @@ def cerrar_semana(semana: str) -> dict:
         x["n"] += 1
         if p.comentario and p.tipo == "adicional":
             x["coment"].append(p.comentario)
-    for tid in PED.de_semana(semana):
-        PED.borrar(semana, tid)
+    PED.borrar_semana(semana)
     for tid, x in por_tienda.items():
         if x["kg"] > 0:
             PED.guardar(semana, tid, cajas_de_kg(x["kg"]), round(x["kg"], 1),

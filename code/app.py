@@ -8,34 +8,53 @@
   /central                (admin) herramienta avanzada del optimizador: escenarios, mapa y analítica
 
     .venv/bin/python app.py      ->  http://127.0.0.1:5000      (Windows: .venv/Scripts/python app.py)
+
+Producción (ver .env.example y docs/guia_app.md): MODARE_ENV=produccion, MODARE_DB=postgresql://…, MODARE_SECRET_KEY,
+y un servidor WSGI:  gunicorn -w 2 -b 0.0.0.0:8000 app:app   (Windows: waitress-serve --port 8000 app:app)
 """
+import csv
+import io
 import multiprocessing
 import os
 import re
 import threading
 import traceback
 
-from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, url_for
+from flask import Flask, Response, abort, flash, jsonify, redirect, render_template, request, url_for
 from flask_login import login_required
 
 import gestion
 from gestion import rol_requerido
 
+from modare import bd as BD
 from modare import config as C
 from modare import pedidos as PED
 from modare.datos import cargar_datos, demanda_estimada
-from modare.planificador import cargar_plan, planificar
+from modare.planificador import cargar_plan, filas_paradas, planificar
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("MODARE_SECRET_KEY", "hackathon-modare")   # cambiadla en producción
+PRODUCCION = os.environ.get("MODARE_ENV", "desarrollo").lower() in ("produccion", "producción", "production")
+_clave = os.environ.get("MODARE_SECRET_KEY", "")
+if PRODUCCION:
+    # configuración obligatoria para uso real (ver .env.example)
+    if len(_clave) < 32:
+        raise RuntimeError("MODARE_ENV=produccion exige MODARE_SECRET_KEY de al menos 32 caracteres "
+                           "(genera una con: python -c \"import secrets; print(secrets.token_urlsafe(48))\")")
+    if not os.environ.get("MODARE_DB"):
+        raise RuntimeError("MODARE_ENV=produccion exige MODARE_DB (p. ej. postgresql://usuario:clave@host/base)")
+    app.config["SESSION_COOKIE_SECURE"] = True        # la cookie de sesión solo viaja por HTTPS
+    app.config["PREFERRED_URL_SCHEME"] = "https"
+    if os.environ.get("MODARE_PROXY", "1") != "0":   # detrás de un proxy (nginx, Render, Azure…): IP y https reales
+        from werkzeug.middleware.proxy_fix import ProxyFix
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+app.secret_key = _clave or "solo-para-desarrollo-local"
 # En Windows el optimizador lanza procesos hijos (spawn) que reimportan este fichero como __mp_main__.
-# Allí NO hay que montar la app ni abrir/sembrar la base de datos SQLite: competiría con las peticiones
+# Allí NO hay que montar la app ni abrir/sembrar la base de datos: competiría con las peticiones
 # web mientras se calculan las rutas y hacía caer el servidor al navegar a otra página.
 _ES_HIJO = multiprocessing.parent_process() is not None
 if not _ES_HIJO:
     gestion.init_app(app)
     DATOS = cargar_datos()
-TRABAJOS: dict[str, dict] = {}   # semana -> {"estado": "calculando"|"ok"|"error", "msg": str}
 
 
 def _sem(v: str | None) -> str:
@@ -64,16 +83,16 @@ def central():
                       "pedido_cajas": p["cajas"] if p else None, "pedido_kg": p["kg"] if p else None,
                       "estim_kg": est.get(t.id_tienda), "comentario": p["comentario"] if p else ""})
     return render_template("central.html", semana=semana, filas=filas, n_pedidos=len(peds),
-                           plan=cargar_plan(semana), trabajo=TRABAJOS.get(semana))
+                           plan=cargar_plan(semana), trabajo=BD.estado_trabajo(semana))
 
 
 def _lanzar(semana, kw):
     try:
         planificar(semana, log=lambda *a: None, **kw)
-        TRABAJOS[semana] = {"estado": "ok"}
+        BD.poner_trabajo(semana, "ok")
     except Exception as e:  # noqa: BLE001 — se muestra en la web
         traceback.print_exc()
-        TRABAJOS[semana] = {"estado": "error", "msg": str(e)}
+        BD.poner_trabajo(semana, "error", str(e))
 
 
 @app.post("/central/optimizar")
@@ -81,13 +100,12 @@ def _lanzar(semana, kw):
 @rol_requerido()
 def optimizar():
     semana = _sem(request.form.get("semana"))
-    if TRABAJOS.get(semana, {}).get("estado") == "calculando":
+    if not BD.reclamar_trabajo(semana):
         flash("Ya hay una optimización en marcha para esta semana.")
         return redirect(url_for("central", semana=semana))
     kw = {"fuente": request.form.get("fuente", "mixto"), "asignacion": request.form.get("asignacion", "optimo"),
           "segundos": int(request.form.get("segundos", 30)), "precio_co2": float(request.form.get("precio_co2", 0)),
           "plantas_futuras": bool(request.form.get("plantas_futuras"))}
-    TRABAJOS[semana] = {"estado": "calculando"}
     threading.Thread(target=_lanzar, args=(semana, kw), daemon=True).start()
     return redirect(url_for("central", semana=semana))
 
@@ -96,7 +114,7 @@ def optimizar():
 @login_required
 @rol_requerido()
 def estado():
-    return jsonify(TRABAJOS.get(_sem(request.args.get("semana")), {}))
+    return jsonify(BD.estado_trabajo(_sem(request.args.get("semana"))))
 
 
 @app.get("/central/plan")
@@ -122,8 +140,16 @@ def plan_json():
 @login_required
 @rol_requerido()
 def paradas_csv():
-    f = C.SALIDAS_DIR / _sem(request.args.get("semana")) / "paradas.csv"
-    return send_file(f, as_attachment=True) if f.exists() else abort(404)
+    """Se genera desde el plan guardado en la base de datos (no depende de que exista el fichero en disco)."""
+    semana = _sem(request.args.get("semana"))
+    plan = cargar_plan(semana)
+    if not plan:
+        abort(404)
+    buf = io.StringIO()
+    buf.write("\ufeff")                    # BOM: Excel muestra bien las tildes
+    csv.writer(buf).writerows(filas_paradas(plan))
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename=paradas_{semana}.csv"})
 
 
 if __name__ == "__main__":

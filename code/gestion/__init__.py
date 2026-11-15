@@ -11,14 +11,16 @@ from functools import wraps
 
 from flask import abort, flash, redirect, request, session, url_for
 from flask_login import LoginManager, current_user
+from flask_migrate import Migrate
 
 from modare import config as C
 
 from .modelos import (DIAS_SEMANA, ESTADOS_CAMION, ESTADOS_PEDIDO, ESTADOS_REPOSICION, ESTADOS_VIAJE, FRECUENCIAS, ROLES,
                       Usuario, db)
 
-DB_PATH = C.CODE_DIR / "gestion.db"
+DIR_MIGRACIONES = C.CODE_DIR / "migrations"
 login = LoginManager()
+migrate = Migrate()
 login.login_view = "auth.entrar"
 login.login_message = "Inicia sesión para continuar."
 
@@ -77,10 +79,16 @@ def _comprobar_csrf():
 
 # ----------------------------------------------------------------------------- montaje
 def init_app(app):
-    app.config.setdefault("SQLALCHEMY_DATABASE_URI", os.environ.get("MODARE_DB", f"sqlite:///{DB_PATH}"))
-    app.config.setdefault("SESSION_COOKIE_SAMESITE", "Lax")      # el navegador no manda la sesión desde otras webs
-    app.config.setdefault("SESSION_COOKIE_HTTPONLY", True)
+    from modare.bd import url_bd
+    url = url_bd()                       # la MISMA base que usa la librería de rutas (variable MODARE_DB)
+    app.config.setdefault("SQLALCHEMY_DATABASE_URI", url)
+    app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {"pool_pre_ping": True})
+    # (asignación directa: Flask ya trae estas claves definidas y setdefault no las cambiaría)
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"      # el navegador no manda la sesión desde otras webs
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
     db.init_app(app)
+    # render_as_batch: SQLite no sabe alterar columnas; Alembic recrea la tabla. En PostgreSQL no hace falta.
+    migrate.init_app(app, db, directory=str(DIR_MIGRACIONES), render_as_batch=url.startswith("sqlite"))
     login.init_app(app)
 
     from .vistas_admin import bp as bp_admin
@@ -132,5 +140,5 @@ def init_app(app):
         return "—" if v is None else f"{v * 100:.0f} %"
 
     with app.app_context():
-        from .semilla import sembrar_si_vacia
-        sembrar_si_vacia()
+        from .basedatos import preparar_bd
+        preparar_bd()

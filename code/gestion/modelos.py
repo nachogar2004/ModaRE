@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import math
+import sqlite3
 
 from flask_login import UserMixin
 from flask_sqlalchemy import SQLAlchemy
@@ -23,10 +24,12 @@ db = SQLAlchemy()
 
 @event.listens_for(Engine, "connect")
 def _fk_sqlite(con, _):
-    """SQLite no comprueba claves foráneas si no se le pide: así no se borra una tienda con historial."""
-    cur = con.cursor()
-    cur.execute("PRAGMA foreign_keys=ON")
-    cur.close()
+    """SQLite no comprueba claves foráneas si no se le pide: así no se borra una tienda con historial.
+    (PostgreSQL las comprueba siempre; ahí no se hace nada.)"""
+    if isinstance(con, sqlite3.Connection):
+        cur = con.cursor()
+        cur.execute("PRAGMA foreign_keys=ON")
+        cur.close()
 
 
 def ahora() -> dt.datetime:
