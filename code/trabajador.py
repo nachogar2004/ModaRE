@@ -5,10 +5,10 @@ datos. Este programa, ejecutado en un ordenador potente (p. ej. tu Mac), vigila 
 potencia y guarda el resultado en la MISMA base de datos: las rutas aparecen al momento en la web.
 
     cd code
-    export MODARE_DB='postgresql://…'        # la misma base que usa la web
+    export MODARE_DB='postgresql://…'        # o escríbela en code/.env (MODARE_DB=…), que no se sube a git
     .venv/bin/python trabajador.py           # Windows: .venv\\Scripts\\python trabajador.py
 
-Déjalo abierto mientras quieras poder optimizar desde la web. Ctrl + C para pararlo.
+Para que esté SIEMPRE en marcha en un Mac (arranca solo y se reinicia si falla):  ./servicio_trabajador.sh instalar
 """
 from __future__ import annotations
 
@@ -26,10 +26,28 @@ def _hora() -> str:
     return dt.datetime.now().strftime("%H:%M:%S")
 
 
+def cargar_env(ruta: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")):
+    """Lee code/.env (CLAVE=valor por línea; # comentarios). No pisa variables ya definidas en el entorno."""
+    if not os.path.exists(ruta):
+        return
+    with open(ruta, encoding="utf-8") as f:
+        for linea in f:
+            linea = linea.strip()
+            if not linea or linea.startswith("#") or "=" not in linea:
+                continue
+            clave, valor = linea.split("=", 1)
+            clave = clave.strip().removeprefix("export ").strip()
+            valor = valor.strip()
+            if len(valor) >= 2 and valor[0] == valor[-1] and valor[0] in "'\"":
+                valor = valor[1:-1]
+            os.environ.setdefault(clave, valor)
+
+
 def main():
+    cargar_env()
     if not os.environ.get("MODARE_DB"):
-        sys.exit("Falta MODARE_DB: define la misma base de datos que usa la web, p. ej.\n"
-                 "  export MODARE_DB='postgresql://…'")
+        sys.exit("Falta MODARE_DB: define la misma base de datos que usa la web, con\n"
+                 "  export MODARE_DB='postgresql://…'   o escribiéndola en code/.env  (MODARE_DB=postgresql://…)")
     from gestion import optimizador as OPT
     from gestion.basedatos import app_bd
     from modare import bd as BD

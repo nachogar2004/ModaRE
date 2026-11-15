@@ -397,6 +397,15 @@ se calculan en un ordenador potente que comparte la base de datos:
    ```
    Déjalo abierto: recoge las peticiones, optimiza con toda su potencia y guarda las rutas en la base; la web se
    actualiza sola. Ctrl + C para pararlo. Si está apagado, las peticiones esperan en cola hasta que se conecte.
+3. **Para no tener que abrir la terminal (Mac):** instálalo como servicio. Arranca solo al iniciar sesión, va en
+   segundo plano y se reinicia si falla. Una sola vez:
+   ```bash
+   cd code
+   echo "MODARE_DB=postgresql://…" > .env      # la cadena de la base (no se sube a git)
+   ./servicio_trabajador.sh instalar
+   ```
+   `./servicio_trabajador.sh estado` (¿está en marcha?), `registro` (ver lo que hace), `reiniciar` (tras un
+   `git pull`), `desinstalar`. Solo calcula con el Mac encendido y despierto; si duerme, las peticiones esperan.
 
 ### Cambiar el esquema (añadir un campo, una tabla…)
 

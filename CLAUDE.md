@@ -120,6 +120,7 @@ Los **camiones físicos** = máximo de rutas solapadas por (depósito, tarifa): 
 code/
   app.py              Flask: monta la app de gestión (gestion/) y /central (optimizador avanzado + mapa, solo admin)
   gestion/            app de gestión del transporte con usuarios y roles (ver «App de gestión» más abajo)
+  servicio_trabajador.sh  instala trabajador.py como servicio de macOS (launchd); lee MODARE_DB de code/.env
   trabajador.py       «ordenador optimizador»: con MODARE_OPTIMIZADOR=externo la web encola y esto calcula (misma MODARE_DB)
   gestion/basedatos.py  prepara la base al arrancar: migraciones, carga inicial, adopción de bases antiguas
   migrations/         migraciones Alembic (Flask-Migrate) de TODAS las tablas (app + librería)
