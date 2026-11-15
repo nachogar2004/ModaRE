@@ -16,12 +16,12 @@
   <a href="{{ url_for('paradas_csv', semana=semana) }}">descargar paradas.csv</a> · <a href="{{ url_for('central', semana=semana) }}">volver</a></p>
 
 <div class="kpis card">
-  <div class="kpi"><div class="v">{{ '{:,.0f}'.format(r.coste_eur) }} €</div><div class="l">coste total ({{ r.eur_por_kg }} €/kg)</div></div>
+  <div class="kpi"><div class="v">{{ '{:,.0f}'.format(r.coste_eur) }} €</div><div class="l">coste total ({{ r.eur_por_kg if r.eur_por_kg is not none else '–' }} €/kg)</div></div>
   <div class="kpi"><div class="v">{{ r.rutas }} / {{ r.camiones }}</div><div class="l">rutas / camiones físicos</div></div>
   <div class="kpi"><div class="v">{{ '{:,.0f}'.format(r.km) }}</div><div class="l">km</div></div>
   <div class="kpi"><div class="v">{{ '{:,.0f}'.format(r.litros) }} L</div><div class="l">gasóleo</div></div>
   <div class="kpi"><div class="v">{{ '{:,.1f}'.format(r.co2_kg / 1000) }} t</div><div class="l">CO₂e</div></div>
-  <div class="kpi"><div class="v">{{ '%.1f'|format(100 * r.nivel_servicio) }} %</div><div class="l">servicio (objetivo {{ '%.0f'|format(100 * r.nivel_servicio_objetivo) }} %)</div></div>
+  <div class="kpi"><div class="v">{{ '%.1f'|format(100 * r.nivel_servicio) ~ ' %' if r.nivel_servicio is not none else '–' }}</div><div class="l">servicio (objetivo {{ '%.0f'|format(100 * r.nivel_servicio_objetivo) }} %)</div></div>
   <div class="kpi"><div class="v">{{ '%.0f'|format(100 * r.ocupacion_media_cajas) }} %</div><div class="l">ocupación media</div></div>
   <div class="kpi"><div class="v">{{ r.pernoctas }}</div><div class="l">pernoctas</div></div>
 </div>
