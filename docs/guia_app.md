@@ -16,6 +16,7 @@ con el optimizador del repo (`code/modare`).
 - [10. Datos inventados (sintéticos)](#10-datos-inventados-sintéticos)
 - [11. Problemas frecuentes](#11-problemas-frecuentes)
 - [12. Uso real: base de datos y despliegue](#12-uso-real-base-de-datos-y-despliegue)
+- [13. Nuestra instalación: Render, Neon y el Mac optimizador](#13-nuestra-instalación-render-neon-y-el-mac-optimizador)
 
 ---
 
@@ -461,20 +462,24 @@ se calculan en un ordenador potente que comparte la base de datos:
 1. En el servidor: `MODARE_OPTIMIZADOR=externo`. El botón **Optimizar** de *Planificación* ya no calcula: deja la
    petición **en cola**, y la página muestra si el «ordenador optimizador» está conectado.
 2. En el ordenador potente (con el repositorio y el entorno instalados):
+
    ```bash
    cd code
    export MODARE_DB='postgresql://…'      # la misma base que la web
    .venv/bin/python trabajador.py         # Windows: .venv\Scripts\python trabajador.py
    ```
+
    Déjalo abierto: recoge las peticiones, optimiza con toda su potencia y guarda las rutas en la base; la web se
    actualiza sola. Ctrl + C para pararlo. Si está apagado, las peticiones esperan en cola hasta que se conecte.
 3. **Para no tener que abrir la terminal (Mac):** instálalo como servicio. Arranca solo al iniciar sesión, va en
    segundo plano y se reinicia si falla. Una sola vez:
+
    ```bash
    cd code
    echo "MODARE_DB=postgresql://…" > .env      # la cadena de la base (no se sube a git)
    ./servicio_trabajador.sh instalar
    ```
+
    `./servicio_trabajador.sh estado` (¿está en marcha?), `registro` (ver lo que hace), `reiniciar` (tras un
    `git pull`), `desinstalar`. Solo calcula con el Mac encendido y despierto; si duerme, las peticiones esperan.
 
@@ -497,3 +502,81 @@ recrean tablas (si no, se borrarían en cascada filas relacionadas).
 Una `gestion.db` antigua se adopta sola en el primer arranque: se completa, se quita la columna del antiguo
 «almacén habitual», se marca con la versión inicial y a partir de ahí mandan las migraciones. Si existe el
 antiguo `code/pedidos.db`, sus pedidos se copian a la base común y el fichero queda como `pedidos.db.migrado`.
+
+---
+
+## 13. Nuestra instalación: Render, Neon y el Mac optimizador
+
+### Piezas
+
+| Pieza | Qué hace | Dónde |
+|---|---|---|
+| **Web** | La app que usan tiendas, plantas, almacenes y admin | Render (plan gratuito), desplegada desde la rama `despliegue` |
+| **Base de datos** | Todos los datos de la app y del optimizador | Neon, PostgreSQL en la UE (Frankfurt) |
+| **Ordenador optimizador** | Calcula las rutas que se piden desde la web | El Mac, con `trabajador.py` como servicio (`servicio_trabajador.sh`) |
+| **Despertador** | Evita que la web gratuita se duerma | cron-job.org llama a `/entrar` cada 10 min |
+
+La web y el Mac **comparten la misma base de datos**: la web deja la petición en cola, el Mac la calcula y guarda las
+rutas, y la web las enseña.
+
+### Configuración de Render
+
+| Ajuste | Valor |
+|---|---|
+| Branch | `despliegue` |
+| Root Directory | `code` |
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `flask --app app db upgrade && gunicorn -w 1 --threads 4 -b 0.0.0.0:$PORT --timeout 120 app:app` |
+| Variables | `MODARE_ENV=produccion`, `MODARE_DB` (cadena de Neon), `MODARE_SECRET_KEY`, `MODARE_OPTIMIZADOR=externo` |
+
+Las contraseñas y la cadena de conexión **no están en git** (variables de Render y `code/.env` del Mac).
+
+### Ramas de git
+
+| Rama | Para qué |
+|---|---|
+| `main` | Donde trabaja el equipo. Cada cambio nuevo se hace en una rama propia que sale de `main` y se integra en `main` |
+| `despliegue` | Lo que se ve en la web. Solo se actualiza cuando se decide publicar |
+
+**Trabajar en algo nuevo:**
+
+```bash
+git switch main && git pull
+git switch -c nombre-del-cambio
+# … cambios, commit, push; luego se integra en main
+```
+
+**Publicar la web** (copiar `main` a `despliegue`; Render despliega solo en 3–5 min):
+
+```bash
+git push origin main:despliegue
+```
+
+Después, actualizar el Mac optimizador para que use el mismo código:
+
+```bash
+cd ~/ModaRE/code && git pull && ./servicio_trabajador.sh reiniciar
+```
+
+### Probar la planificación en la web
+
+1. Entrar como `admin` → **Planificación**: arriba aparece cuántos pedidos están pendientes.
+2. Elegir el primer día de reparto y pulsar **Cerrar pedidos y calcular rutas**: se crea el lote (`L-0002`…) y queda en cola.
+3. El Mac lo recoge en segundos (*Calculando*) y en unos minutos aparecen las rutas, los camiones y el mapa.
+4. Seguir el flujo: la planta expide → el almacén recibe y carga → la tienda confirma la recepción.
+5. Si algo sale mal: **Deshacer lote** devuelve los pedidos a pendientes.
+
+Comprobar el Mac: `./servicio_trabajador.sh estado` (¿en marcha?) y `./servicio_trabajador.sh registro` (qué hace).
+Si está apagado o dormido, las peticiones esperan en cola hasta que vuelva.
+
+### Probar en local (sin tocar la web)
+
+```bash
+cd ~/ModaRE/code
+PORT=5050 .venv/bin/python app.py        # http://127.0.0.1:5050 (AirPlay ocupa el 5000)
+```
+
+Usa `code/gestion.db`, una base solo tuya: lo que hagas ahí no llega a la web. Usuarios de la semilla local:
+`admin`/`admin` y `modare2026` para el resto (`td-001`, `pl-mad`, `al-madrid`…). En la web, las contraseñas
+son las de producción.
+
