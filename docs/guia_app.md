@@ -286,7 +286,7 @@ las migraciones de `code/migrations/`.
 | `ajustes` | estado interno (semanas cerradas, último día de pedidos automáticos) |
 | `pedidos_optimizador` | (librería) pedido semanal de cada tienda en kg y cajas: la entrada del optimizador |
 | `planes` | (librería) el plan de cada semana en JSON |
-| `trabajos_optimizacion` | (librería) estado de cada optimización; una «calculando» de más de 30 min se da por interrumpida |
+| `trabajos_optimizacion` | (librería) estado de cada optimización; una «calculando» de más de 60 min se da por interrumpida |
 | `alembic_version` | versión del esquema (migraciones) |
 
 Código: `gestion/vistas_*.py` (pantallas), `gestion/logistica.py` (reglas de negocio),

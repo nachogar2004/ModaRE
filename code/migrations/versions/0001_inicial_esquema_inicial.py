@@ -320,12 +320,14 @@ def upgrade():
     sa.Column('comentario', sa.Text(), nullable=True),
     sa.Column('actualizado', sa.DateTime(), nullable=False),
     sa.PrimaryKeyConstraint('semana', 'id_tienda')
+    , if_not_exists=True   # el optimizador (CLI) puede haberla creado antes
     )
     op.create_table('planes',
     sa.Column('semana', sa.String(length=8), nullable=False),
     sa.Column('plan', sa.Text(), nullable=False),
     sa.Column('actualizado', sa.DateTime(), nullable=False),
     sa.PrimaryKeyConstraint('semana')
+    , if_not_exists=True   # el optimizador (CLI) puede haberla creado antes
     )
     op.create_table('trabajos_optimizacion',
     sa.Column('semana', sa.String(length=8), nullable=False),
@@ -333,6 +335,7 @@ def upgrade():
     sa.Column('mensaje', sa.Text(), nullable=True),
     sa.Column('actualizado', sa.DateTime(), nullable=False),
     sa.PrimaryKeyConstraint('semana')
+    , if_not_exists=True   # el optimizador (CLI) puede haberla creado antes
     )
     # ### end Alembic commands ###
 

@@ -48,7 +48,7 @@ trabajos = sa.Table(
     sa.Column("actualizado", sa.DateTime, nullable=False),
 )
 
-MAX_MIN_CALCULANDO = 30     # una optimización «calculando» más antigua se da por interrumpida (servidor reiniciado)
+MAX_MIN_CALCULANDO = 60     # una optimización «calculando» más antigua se da por interrumpida (en un servidor lento tarda ~20 min)
 
 _engine = None
 _lock = threading.Lock()

@@ -95,6 +95,8 @@ def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: 
     almacenes: 'todos' -> un almacén por provincia, todos abiertos (requisito); 'optimo' -> el modelo decide cuáles abrir
     """
     t0 = time.time()
+    if int(os.environ.get("MODARE_PROCESOS", 0) or 0) == 1:
+        paralelo = False    # un solo proceso: una configuración por depósito (como --secuencial), si no tarda 3-5 veces más
     semana = semana or PED.semana_actual()
     d = cargar_datos()
     estim = demanda_estimada(d, PED.num_semana(semana))
@@ -144,13 +146,16 @@ def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: 
             trabajos.append(("reparto", a, vs, _segundos_reparto(segundos, len(vs)), precio_co2, e, x, None,
                              previas.get(a)))
     trabajos.sort(key=lambda t: -t[3])   # los largos primero: reparte mejor la carga entre procesos
-    if paralelo and len(trabajos) > 1:
-        # MODARE_PROCESOS limita los procesos en paralelo (en un servidor con poca memoria, p. ej. 2)
-        procesos = int(os.environ.get("MODARE_PROCESOS", 0)) or (os.cpu_count() or 4)
+    # MODARE_PROCESOS limita los procesos en paralelo. Con 1 se resuelve todo en ESTE proceso, sin lanzar otros
+    # (cada proceso nuevo vuelve a cargar los datos): es lo que cabe en un servidor pequeño (512 MB).
+    procesos = int(os.environ.get("MODARE_PROCESOS", 0)) or (os.cpu_count() or 4)
+    if paralelo and len(trabajos) > 1 and procesos > 1:
         with ProcessPoolExecutor(max_workers=min(len(trabajos), procesos),
                                  initializer=_init_trabajador) as ex:
             todos = list(ex.map(_resolver_y_simular, trabajos))
     else:
+        global _D
+        _D = d          # reutiliza los datos ya cargados en vez de recargarlos en cada depósito
         todos = [_resolver_y_simular(t) for t in trabajos]
     deps = list(por_planta) + list(por_almacen)
     resultados = [_mejor([r for r in todos if r["planta"] == dep]) for dep in deps]
