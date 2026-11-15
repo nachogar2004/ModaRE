@@ -257,12 +257,14 @@ def resolver_planta(d: Datos, planta: str, visitas: list[Visita], segundos: int 
     sp.time_limit.seconds = max(1, int(segundos))
     rt.CloseModelWithParameters(sp)
 
-    # --- arranque en caliente: rutas de un plan anterior que sigan siendo válidas ----------------------
-    inicial = {}
+    # --- arranque en caliente: rutas de un plan anterior ----------------------------------------------------
+    # Una sola validación (ReadAssignmentFromRoutes es cara en el troncal por los descansos nocturnos):
+    # si el plan previo ya no es factible con los pedidos de ahora, se arranca de cero.
+    arranque = None
     if previo:
         nodo_de = {v.id: k for k, v in enumerate(visitas, start=1)}
         ids_pool = {veh.id: vi for vi, veh in enumerate(pool)}
-        usados, usadas_visitas = set(), set()
+        usados, usadas_visitas, inicial = set(), set(), {}
         for r in previo:
             nodos = [nodo_de[x] for x in r["visitas"] if x in nodo_de and nodo_de[x] not in usadas_visitas]
             if not nodos:
@@ -272,19 +274,20 @@ def resolver_planta(d: Datos, planta: str, visitas: list[Visita], segundos: int 
                 vi = next((k for k, veh in enumerate(pool) if veh.tarifa == r.get("tarifa") and k not in usados), None)
             if vi is None:
                 continue
-            for cand in (nodos, *([nodos[:m] for m in range(len(nodos) - 1, 0, -1)])):   # si no cabe, acorta la ruta
-                if leer_rutas({**inicial, vi: cand}) is not None:
-                    inicial[vi] = cand
-                    usados.add(vi)
-                    usadas_visitas.update(cand)
-                    break
+            inicial[vi] = nodos
+            usados.add(vi)
+            usadas_visitas.update(nodos)
+        # solo si el plan previo cubre casi todas las visitas de ahora: si no, validarlo cuesta tiempo y no encaja
+        cubiertas = len(usadas_visitas) / len(visitas) if visitas else 0
+        arranque = leer_rutas(inicial) if inicial and cubiertas >= 0.8 else None
+    arranque_caliente = arranque is not None
 
     # --- búsqueda por tandas con parada temprana ---------------------------------------------------------
     # La búsqueda local converge pronto y el resto del tiempo apenas mejora: se resuelve en tandas de
     # ~1/3 del tiempo, cada una partiendo de la mejor solución, y se para cuando una tanda no mejora.
     tanda = max(2, math.ceil(segundos / 3))
     restante = int(segundos)
-    mejor, arranque, arranque_caliente = None, leer_rutas(inicial) if inicial else None, bool(inicial)
+    mejor = None
     while restante >= 1:
         sp.time_limit.seconds = min(tanda, restante)
         restante -= min(tanda, restante)
@@ -300,9 +303,7 @@ def resolver_planta(d: Datos, planta: str, visitas: list[Visita], segundos: int 
             mejor = nuevo
         if mejora <= max(1.0, 0.001 * abs(mejor["obj"])):   # < 0,1 %: converge
             break
-        arranque = leer_rutas(mejor["por_vehiculo"])
-        if arranque is None:
-            break
+        arranque = sol    # la siguiente tanda continúa desde esta solución
     if mejor is None:
         return {"planta": planta, "estado": "SIN_SOLUCION", "rutas": [], "no_servidas": [v.id for v in visitas],
                 "objetivo_eur": float("inf"), "config": f"{estrategia} sin {sorted(excluir)}"}
