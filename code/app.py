@@ -14,6 +14,7 @@ y un servidor WSGI:  gunicorn -w 2 -b 0.0.0.0:8000 app:app   (Windows: waitress-
 """
 import csv
 import io
+import multiprocessing
 import os
 import re
 import threading
@@ -47,8 +48,13 @@ if PRODUCCION:
         from werkzeug.middleware.proxy_fix import ProxyFix
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.secret_key = _clave or "solo-para-desarrollo-local"
-gestion.init_app(app)
-DATOS = cargar_datos()
+# En Windows el optimizador lanza procesos hijos (spawn) que reimportan este fichero como __mp_main__.
+# Allí NO hay que montar la app ni abrir/sembrar la base de datos: competiría con las peticiones
+# web mientras se calculan las rutas y hacía caer el servidor al navegar a otra página.
+_ES_HIJO = multiprocessing.parent_process() is not None
+if not _ES_HIJO:
+    gestion.init_app(app)
+    DATOS = cargar_datos()
 
 
 def _sem(v: str | None) -> str:

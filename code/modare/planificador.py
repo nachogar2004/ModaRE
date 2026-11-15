@@ -23,7 +23,7 @@ from . import pedidos as PED
 from .asignacion import asignar, plantas_activas, tiendas_sin_almacen
 from .datos import cargar_datos, construir_visitas, construir_visitas_troncal, demanda_estimada
 from .osrm import añadir_geometrias
-from .simulacion import flota_necesaria, simular_ruta
+from .simulacion import flota_necesaria, simular_con_reajuste
 from .vrp import PORTAFOLIO, resolver_planta
 
 _D = None  # datos cargados una vez por proceso trabajador
@@ -35,12 +35,12 @@ def _init_trabajador():
 
 
 def _resolver_y_simular(args):
-    escalon, dep, visitas, segundos, precio_co2, estrategia, excluir, tipos = args
+    escalon, dep, visitas, segundos, precio_co2, estrategia, excluir, tipos, previo = args
     d = _D if _D is not None else cargar_datos()
     # reparto desde un almacén provincial: el conductor vuelve a dormir a casa (rutas de 1 día por defecto)
     dias_max = int(d.P.get("dias_max_ruta_reparto", d.P["dias_max_ruta"])) if escalon == "reparto" else None
-    res = resolver_planta(d, dep, visitas, segundos, precio_co2, estrategia, excluir, tipos, dias_max)
-    res["rutas"] = [simular_ruta(d, dep, r) for r in res["rutas"]]
+    res = resolver_planta(d, dep, visitas, segundos, precio_co2, estrategia, excluir, tipos, dias_max, previo)
+    res["rutas"] = [simular_con_reajuste(d, dep, r) for r in res["rutas"]]
     res["escalon"] = escalon
     return res
 
@@ -53,6 +53,22 @@ def _mejor(resultados: list[dict]) -> dict:
 def _segundos_reparto(segundos: int, n_visitas: int) -> int:
     """Los almacenes tienen pocas tiendas: tiempo de búsqueda proporcional al tamaño."""
     return max(3, min(segundos, math.ceil(segundos * n_visitas / 25)))
+
+
+def _rutas_previas(semana: str) -> dict[str, list[dict]]:
+    """Rutas por depósito de un plan anterior, para arrancar el solver en caliente: el de esta misma semana
+    si se vuelve a calcular, y si no el más reciente de una semana anterior. {} si no hay ninguno."""
+    try:
+        candidatas = sorted((p.name for p in C.SALIDAS_DIR.iterdir() if (p / "plan.json").exists()), reverse=True)
+        elegida = next((n for n in candidatas if n <= semana), None)
+        plan = cargar_plan(elegida) if elegida else None
+    except Exception:  # noqa: BLE001 — un plan previo ilegible no debe impedir calcular
+        return {}
+    por_dep: dict[str, list[dict]] = defaultdict(list)
+    for r in (plan or {}).get("rutas", []):
+        por_dep[r.get("origen", r["planta"])].append(
+            {"id": r["id"], "tarifa": r.get("tarifa"), "visitas": [p["visita"] for p in r["paradas"]]})
+    return dict(por_dep)
 
 
 def _kpis(rutas: list[dict]) -> dict:
@@ -70,12 +86,13 @@ def _kpis(rutas: list[dict]) -> dict:
 
 def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: str = "optimo",
                plantas_futuras: bool = False, segundos: int = 30, precio_co2: float = C.PRECIO_CO2_EUR_T,
-               solo_muestra: bool = False, paralelo: bool = True, log=print) -> dict:
+               solo_muestra: bool = False, paralelo: bool = True, almacenes: str = "todos", log=print) -> dict:
     """
     fuente: 'pedidos'    -> solo lo que han pedido las tiendas en la app
             'estimacion' -> demanda estimada por ventas (sin app)
             'mixto'      -> pedido si existe; si no, estimación (por defecto)
     segundos: tiempo de búsqueda por planta en el troncal (los almacenes usan menos, según su tamaño)
+    almacenes: 'todos' -> un almacén por provincia, todos abiertos (requisito); 'optimo' -> el modelo decide cuáles abrir
     """
     t0 = time.time()
     semana = semana or PED.semana_actual()
@@ -100,26 +117,32 @@ def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: 
                        "kg": round(sum(v.kg for v in visitas if v.tienda == tid), 1),
                        "motivo": "Ha vetado todos los almacenes que pueden recibir mercancía: no se puede servir"})
     visitas = [v for v in visitas if v.tienda not in vetadas]
-    uso = asignar(d, visitas, plantas, asignacion)
-    troncal = construir_visitas_troncal(d, visitas, uso["almacen_planta"])
+    uso = asignar(d, visitas, plantas, asignacion, almacenes)
+    troncal = construir_visitas_troncal(d, visitas, uso["flujos"])
     log(f"[{semana}] {len(demanda)} tiendas con demanda, {len(visitas)} entregas a tienda desde "
         f"{len(uso['almacenes'])} almacenes, {len(troncal)} reposiciones troncales desde {plantas}")
+    multi = {a: list(fl) for a, fl in uso["flujos"].items() if len(fl) > 1}
+    if multi:
+        log(f"  almacenes que reciben de varias plantas: {multi}")
 
     tipos_troncal = set(str(d.P["tipos_troncal"]).split(";"))
+    previas = _rutas_previas(semana)
     trabajos = []
     por_planta = defaultdict(list)
     for v in troncal:
         por_planta[v.deposito].append(v)
     for p, vs in por_planta.items():
         for e, x in (PORTAFOLIO[:3] if paralelo else PORTAFOLIO[:1]):
-            trabajos.append(("troncal", p, vs, segundos, precio_co2, e, x, tipos_troncal))
+            trabajos.append(("troncal", p, vs, segundos, precio_co2, e, x, tipos_troncal,
+                             previas.get(p)))
     por_almacen = defaultdict(list)
     for v in visitas:
         por_almacen[v.deposito].append(v)
     for a, vs in por_almacen.items():
         port = PORTAFOLIO if len(vs) > 6 else PORTAFOLIO[:2]
         for e, x in (port if paralelo else port[:1]):
-            trabajos.append(("reparto", a, vs, _segundos_reparto(segundos, len(vs)), precio_co2, e, x, None))
+            trabajos.append(("reparto", a, vs, _segundos_reparto(segundos, len(vs)), precio_co2, e, x, None,
+                             previas.get(a)))
     trabajos.sort(key=lambda t: -t[3])   # los largos primero: reparte mejor la carga entre procesos
     if paralelo and len(trabajos) > 1:
         with ProcessPoolExecutor(max_workers=min(len(trabajos), os.cpu_count() or 4),
@@ -161,7 +184,9 @@ def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: 
         "semana": semana, "fuente": fuente, "asignacion": asignacion, "segundos_por_planta": segundos,
         "precio_co2_eur_t": precio_co2,
         "tiendas_con_demanda": len(demanda), "pedidos_app": len(peds), "visitas": len(visitas),
-        "almacenes_usados": len(uso["almacenes"]), "reposiciones_troncal": len(troncal),
+        "almacenes_modo": almacenes, "almacenes_usados": len(uso["almacenes"]),
+        "almacenes_abiertos": len(uso["almacenes"]) + len(uso["inactivos"]), "almacenes_cerrados": len(uso["cerrados"]),
+        "reposiciones_troncal": len(troncal),
         "kg_demandados": round(kg_dem, 1), "kg_a_tiempo": round(kg_ok, 1),
         "nivel_servicio": round(kg_ok / kg_dem, 4) if kg_dem else None,
         "nivel_servicio_troncal": round(kg_tro_ok / kg_tro, 4) if kg_tro else None,
@@ -170,15 +195,34 @@ def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: 
         "troncal": _kpis(tro), "reparto": _kpis(rep),
         "segundos_calculo": round(time.time() - t0, 1),
     }
+    # coste_eur = transporte (suma de las rutas). Los almacenes abiertos suman su fijo semanal + manipulación.
+    c_fijo = (sum(u["coste_fijo_eur"] for u in uso["almacenes"].values())
+              + sum(u["coste_fijo_eur"] for u in uso["inactivos"].values()))
+    c_manip = sum(u["coste_manipulacion_eur"] for u in uso["almacenes"].values())
+    resumen["coste_transporte_eur"] = resumen["coste_eur"]
+    resumen["almacenes"] = {"fijo_eur": round(c_fijo, 2), "manipulacion_eur": round(c_manip, 2),
+                            "total_eur": round(c_fijo + c_manip, 2)}
+    resumen["coste_total_eur"] = round(resumen["coste_eur"] + c_fijo + c_manip, 2)
     resumen["eur_por_kg"] = round(resumen["coste_eur"] / kg_ok, 3) if kg_ok else None
+    resumen["eur_por_kg_total"] = round(resumen["coste_total_eur"] / kg_ok, 3) if kg_ok else None
     plan = {
         "resumen": resumen, "flota": flota_necesaria(rutas),
         "plantas": [{"id": p, "nombre": pl.loc[p].nombre, "lat": pl.loc[p].lat, "lon": pl.loc[p].lon, **u}
                     for p, u in uso["plantas"].items()],
         "almacenes": [{"id": a, "nombre": al.loc[a].nombre, "lat": al.loc[a].lat, "lon": al.loc[a].lon,
                        "poligono": str(al.loc[a].get("poligono", "") or ""),
-                       "municipio": str(al.loc[a].get("municipio", "") or ""), **u}
-                      for a, u in sorted(uso["almacenes"].items())],
+                       "municipio": str(al.loc[a].get("municipio", "") or ""), "abierto": True, **u}
+                      for a, u in sorted(uso["almacenes"].items())]
+                     + [{"id": a, "nombre": al.loc[a].nombre, "lat": al.loc[a].lat, "lon": al.loc[a].lon,
+                         "poligono": str(al.loc[a].get("poligono", "") or ""),
+                         "municipio": str(al.loc[a].get("municipio", "") or ""), "abierto": False,
+                         "kg": 0, "capacidad": al.loc[a].capacidad_kg_semana, "planta": "", "plantas": {},
+                         "tiendas": 0, "coste_fijo_eur": 0, "coste_manipulacion_eur": 0}
+                        for a in uso["cerrados"]]
+                     + [{"id": a, "nombre": al.loc[a].nombre, "lat": al.loc[a].lat, "lon": al.loc[a].lon,
+                         "poligono": str(al.loc[a].get("poligono", "") or ""),
+                         "municipio": str(al.loc[a].get("municipio", "") or ""), "abierto": True, **u}
+                        for a, u in uso["inactivos"].items()],
         "rutas": rutas,
         "no_servidas": [{"escalon": esc, "visita": i, "tienda": vis_by_id[i].tienda, "kg": vis_by_id[i].kg,
                          "nombre": d.nombre_lugar(vis_by_id[i].tienda)[0]} for esc, i in no_servidas],
@@ -229,10 +273,15 @@ def guardar(plan: dict):
             w.writerow([r["nombre"], r.get("escalon"), o, r["planta"], *(r[c] for c in cols), recorrido, r["id"]])
     with open(out / "almacenes.csv", "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["almacen", "nombre", "planta", "tiendas", "kg_semana", "capacidad_kg_semana", "uso"])
+        w.writerow(["almacen", "nombre", "abierto", "planta_principal", "plantas_kg", "tiendas", "kg_semana",
+                    "capacidad_kg_semana", "uso", "coste_fijo_eur", "coste_manipulacion_eur", "coste_almacen_eur",
+                    "eur_por_kg_almacen"])
         for a in plan.get("almacenes", []):
-            w.writerow([a["id"], a["nombre"], a["planta"], a["tiendas"], a["kg"], a["capacidad"],
-                        round(a["kg"] / a["capacidad"], 3)])
+            pk = "; ".join(f"{p}: {k}" for p, k in a.get("plantas", {a["planta"]: a["kg"]}).items())
+            ca = a.get("coste_fijo_eur", 0) + a.get("coste_manipulacion_eur", 0)
+            w.writerow([a["id"], a["nombre"], int(a.get("abierto", True)), a["planta"], pk, a["tiendas"], a["kg"],
+                        a["capacidad"], round(a["kg"] / a["capacidad"], 3), a.get("coste_fijo_eur", 0),
+                        a.get("coste_manipulacion_eur", 0), round(ca, 2), round(ca / a["kg"], 3) if a["kg"] else ""])
     escribir_mapa(plan, out)
 
 

@@ -99,8 +99,12 @@ PORTAFOLIO = [
 def resolver_planta(d: Datos, planta: str, visitas: list[Visita], segundos: int = 30,
                     precio_co2_eur_t: float = C.PRECIO_CO2_EUR_T,
                     estrategia: str = "LOCAL_CHEAPEST_INSERTION", excluir: frozenset = frozenset(),
-                    tipos: set[str] | None = None, dias_max: int | None = None) -> dict:
-    """planta = id del depósito (planta en el troncal, almacén en el reparto)."""
+                    tipos: set[str] | None = None, dias_max: int | None = None,
+                    previo: list[dict] | None = None) -> dict:
+    """planta = id del depósito (planta en el troncal, almacén en el reparto).
+
+    previo: rutas de un plan anterior de este depósito, [{"id": id de vehículo, "tarifa": ..., "visitas": [ids]}].
+    Se usan como solución inicial (arranque en caliente) si siguen siendo válidas; si no, se descartan."""
     P = d.P
     H = int(P["horizonte_planificacion_dias"])
     if dias_max is None:
@@ -221,27 +225,92 @@ def resolver_planta(d: Datos, planta: str, visitas: list[Visita], segundos: int 
     sp = pywrapcp.DefaultRoutingSearchParameters()
     sp.first_solution_strategy = getattr(routing_enums_pb2.FirstSolutionStrategy, estrategia)
     sp.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
-    sp.time_limit.seconds = int(segundos)
-    sol = rt.SolveWithParameters(sp)
-    if sol is None:
+
+    def extraer(sol):
+        """Copia lo que interesa de la solución (el objeto de OR-Tools se reutiliza entre búsquedas)."""
+        rutas, servidas, por_vehiculo = [], set(), {}
+        for vi, veh in enumerate(pool):
+            if not rt.IsVehicleUsed(sol, vi):
+                continue
+            idx, paradas, nodos = rt.Start(vi), [], []
+            salida = sol.Min(tiempo.CumulVar(idx))
+            idx = sol.Value(rt.NextVar(idx))
+            while not rt.IsEnd(idx):
+                nodo = man.IndexToNode(idx)
+                paradas.append({"visita": visitas[nodo - 1], "llegada_solver": sol.Min(tiempo.CumulVar(idx))})
+                servidas.add(nodo)
+                nodos.append(nodo)
+                idx = sol.Value(rt.NextVar(idx))
+            por_vehiculo[vi] = nodos
+            rutas.append({"vehiculo": veh, "salida": salida, "paradas": paradas,
+                          "vuelta_solver": sol.Min(tiempo.CumulVar(idx))})
+        return {"obj": sol.ObjectiveValue(), "rutas": rutas, "servidas": servidas, "por_vehiculo": por_vehiculo}
+
+    def leer_rutas(por_vehiculo):
+        """Rutas {vehículo: [nodos]} -> asignación inicial de OR-Tools, o None si no es válida."""
+        rutas = [[man.NodeToIndex(k) for k in por_vehiculo.get(vi, [])] for vi in range(len(pool))]
+        try:
+            return rt.ReadAssignmentFromRoutes(rutas, True)
+        except Exception:  # noqa: BLE001 — una solución previa inservible nunca debe romper el cálculo
+            return None
+
+    sp.time_limit.seconds = max(1, int(segundos))
+    rt.CloseModelWithParameters(sp)
+
+    # --- arranque en caliente: rutas de un plan anterior ----------------------------------------------------
+    # Una sola validación (ReadAssignmentFromRoutes es cara en el troncal por los descansos nocturnos):
+    # si el plan previo ya no es factible con los pedidos de ahora, se arranca de cero.
+    arranque = None
+    if previo:
+        nodo_de = {v.id: k for k, v in enumerate(visitas, start=1)}
+        ids_pool = {veh.id: vi for vi, veh in enumerate(pool)}
+        usados, usadas_visitas, inicial = set(), set(), {}
+        for r in previo:
+            nodos = [nodo_de[x] for x in r["visitas"] if x in nodo_de and nodo_de[x] not in usadas_visitas]
+            if not nodos:
+                continue
+            vi = ids_pool.get(r["id"])
+            if vi is None or vi in usados:   # el vehículo ya no existe en el pool: otro libre de la misma tarifa
+                vi = next((k for k, veh in enumerate(pool) if veh.tarifa == r.get("tarifa") and k not in usados), None)
+            if vi is None:
+                continue
+            inicial[vi] = nodos
+            usados.add(vi)
+            usadas_visitas.update(nodos)
+        # solo si el plan previo cubre casi todas las visitas de ahora: si no, validarlo cuesta tiempo y no encaja
+        cubiertas = len(usadas_visitas) / len(visitas) if visitas else 0
+        arranque = leer_rutas(inicial) if inicial and cubiertas >= 0.8 else None
+    arranque_caliente = arranque is not None
+
+    # --- búsqueda por tandas con parada temprana ---------------------------------------------------------
+    # La búsqueda local converge pronto y el resto del tiempo apenas mejora: se resuelve en tandas de
+    # ~1/3 del tiempo, cada una partiendo de la mejor solución, y se para cuando una tanda no mejora.
+    tanda = max(2, math.ceil(segundos / 3))
+    restante = int(segundos)
+    mejor = None
+    while restante >= 1:
+        sp.time_limit.seconds = min(tanda, restante)
+        restante -= min(tanda, restante)
+        sol = rt.SolveFromAssignmentWithParameters(arranque, sp) if arranque is not None else             rt.SolveWithParameters(sp)
+        if sol is None and arranque is not None:     # el arranque en caliente no sirvió: empieza de cero
+            arranque, arranque_caliente = None, False
+            sol = rt.SolveWithParameters(sp)
+        if sol is None:
+            break
+        nuevo = extraer(sol)
+        mejora = (mejor["obj"] - nuevo["obj"]) if mejor else float("inf")
+        if mejor is None or nuevo["obj"] < mejor["obj"]:
+            mejor = nuevo
+        if mejora <= max(1.0, 0.001 * abs(mejor["obj"])):   # < 0,1 %: converge
+            break
+        arranque = sol    # la siguiente tanda continúa desde esta solución
+    if mejor is None:
         return {"planta": planta, "estado": "SIN_SOLUCION", "rutas": [], "no_servidas": [v.id for v in visitas],
                 "objetivo_eur": float("inf"), "config": f"{estrategia} sin {sorted(excluir)}"}
 
-    rutas, servidas = [], set()
-    for vi, veh in enumerate(pool):
-        if not rt.IsVehicleUsed(sol, vi):
-            continue
-        idx, paradas = rt.Start(vi), []
-        salida = sol.Min(tiempo.CumulVar(idx))
-        idx = sol.Value(rt.NextVar(idx))
-        while not rt.IsEnd(idx):
-            nodo = man.IndexToNode(idx)
-            paradas.append({"visita": visitas[nodo - 1], "llegada_solver": sol.Min(tiempo.CumulVar(idx))})
-            servidas.add(nodo)
-            idx = sol.Value(rt.NextVar(idx))
-        rutas.append({"vehiculo": veh, "salida": salida, "paradas": paradas,
-                      "vuelta_solver": sol.Min(tiempo.CumulVar(idx))})
+    rutas, servidas = mejor["rutas"], mejor["servidas"]
     no_serv = [visitas[k - 1].id for k in range(1, n) if k not in servidas]
-    return {"planta": planta, "estado": "OK", "objetivo_eur": sol.ObjectiveValue() / 100,
-            "rutas": rutas, "no_servidas": no_serv, "pool": len(pool),
+    return {"planta": planta, "estado": "OK", "objetivo_eur": mejor["obj"] / 100,
+            "rutas": rutas, "no_servidas": no_serv, "pool": len(pool), "arranque_caliente": arranque_caliente,
+            "segundos_usados": int(segundos) - restante,
             "config": f"{estrategia} sin {sorted(excluir)}" if excluir else estrategia}

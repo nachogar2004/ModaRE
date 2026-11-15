@@ -18,8 +18,7 @@ from modare.osrm import matriz
 def main():
     d = cargar_datos()
     P = d.P
-    nodos = list(d.plantas.id_planta) + list(d.almacenes.id_almacen) + \
-        list(d.tiendas[d.tiendas.acceso_carretera == 1].id_tienda)
+    nodos = list(d.plantas.id_planta) + list(d.almacenes.id_almacen) + list(d.tiendas[d.tiendas.acceso_carretera == 1].id_tienda)
     puntos = [d.coords[n] for n in nodos]
     print(f"{len(nodos)} puntos -> {len(nodos) ** 2 - len(nodos)} pares")
     km, mins = matriz(puntos)
