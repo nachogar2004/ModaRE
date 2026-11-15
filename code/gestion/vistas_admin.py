@@ -1,7 +1,9 @@
 """Administrador: gestiona usuarios y toda la red (alta/baja/edición), ve todos los datos y lanza la planificación."""
 from __future__ import annotations
 
+import csv
 import datetime as dt
+import io
 import json
 import math
 import re
@@ -16,8 +18,8 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from flask import (Blueprint, abort, current_app, flash, g, jsonify, make_response, redirect, render_template, request,
-                   url_for)
+from flask import (Blueprint, Response, abort, current_app, flash, g, jsonify, make_response, redirect, render_template,
+                   request, url_for)
 from flask_login import current_user, login_required
 from sqlalchemy import func
 from sqlalchemy.exc import DataError, IntegrityError
@@ -26,6 +28,7 @@ from modare import config as C
 from modare import bd as BD
 from modare import distancias as DIST
 from modare.datos import valor_parametro
+from modare.imputacion import coste_por_tienda
 from modare.osrm import contexto_ssl
 from modare.planificador import cargar_plan
 
@@ -962,6 +965,38 @@ def _resumen_pedidos(peds) -> dict:
             "tiendas": len({p.tienda_id for p in peds}), "urgentes": sum(1 for p in peds if p.urgente)}
 
 
+def _costes_tiendas(plan) -> dict | None:
+    """Coste de transporte imputado a cada tienda (modare.imputacion). None si no hay plan o falla."""
+    if not plan:
+        return None
+    try:
+        return coste_por_tienda(plan)
+    except Exception:  # noqa: BLE001 — la página de planificación no debe caer por esto
+        current_app.logger.exception("No se pudo repartir el coste entre las tiendas")
+        return None
+
+
+@bp.get("/planificacion/costes.csv")
+def costes_csv():
+    """Coste de transporte por tienda de un lote, para facturar o analizar en Excel."""
+    codigo = _lote(request.args.get("lote"))
+    costes = _costes_tiendas(cargar_plan(codigo))
+    if not costes:
+        abort(404)
+    buf = io.StringIO()
+    buf.write("﻿")                       # BOM: Excel muestra bien las tildes
+    w = csv.writer(buf, delimiter=";")        # «;» y coma decimal: lo que espera Excel en español
+    w.writerow(["lote", "id_tienda", "tienda", "municipio", "almacen", "entregas", "kg", "km_almacen_tienda",
+                "coste_troncal_eur", "coste_reparto_eur", "coste_total_eur", "eur_por_kg"])
+    num = lambda v: "" if v is None else f"{v}".replace(".", ",")  # noqa: E731
+    for f in costes["tiendas"]:
+        w.writerow([codigo, f["id"], f["nombre"], f["municipio"], f["almacen"], f["entregas"], num(f["kg"]),
+                    num(f["km_almacen"]), num(f["troncal_eur"]), num(f["reparto_eur"]), num(f["total_eur"]),
+                    num(f["eur_kg"])])
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename=coste_por_tienda_{codigo}.csv"})
+
+
 @bp.route("/planificacion")
 def planificacion():
     """Pedidos acumulados (sin lote) + lotes. Se cierra un lote cuando se quiere, sin esperar a ninguna semana."""
@@ -988,6 +1023,7 @@ def planificacion():
                    reps=Reposicion.query.filter_by(semana=codigo).order_by(Reposicion.planta_id,
                                                                            Reposicion.almacen_id).all(),
                    plan=cargar_plan(codigo), trabajo=BD.estado_trabajo(codigo), flota_t=flota_t, flota_r=flota_r)
+        ctx["costes"] = _costes_tiendas(ctx["plan"])
     # resumen de cada lote para la lista
     info_lotes = []
     for lt in lotes:
