@@ -145,7 +145,9 @@ def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: 
                              previas.get(a)))
     trabajos.sort(key=lambda t: -t[3])   # los largos primero: reparte mejor la carga entre procesos
     if paralelo and len(trabajos) > 1:
-        with ProcessPoolExecutor(max_workers=min(len(trabajos), os.cpu_count() or 4),
+        # MODARE_PROCESOS limita los procesos en paralelo (en un servidor con poca memoria, p. ej. 2)
+        procesos = int(os.environ.get("MODARE_PROCESOS", 0)) or (os.cpu_count() or 4)
+        with ProcessPoolExecutor(max_workers=min(len(trabajos), procesos),
                                  initializer=_init_trabajador) as ex:
             todos = list(ex.map(_resolver_y_simular, trabajos))
     else:
