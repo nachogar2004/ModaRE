@@ -223,6 +223,7 @@ class Tienda(db.Model):
     superficie_m2 = db.Column(db.Float)
     categoria_tamano = db.Column(db.String(10), default="mediana")       # pequeña / mediana / grande
     ventas_anuales_eur = db.Column(db.Float)
+    kg_semana = db.Column(db.Float)                           # ropa que necesita cada semana: lo que reparte el optimizador
     # recepción de mercancía
     dias_recepcion = db.Column(db.String(5), default="L-V")
     ventana_inicio = db.Column(db.String(5), default="10:00")
@@ -248,6 +249,10 @@ class Tienda(db.Model):
     stock = db.relationship("StockTienda", cascade="all, delete-orphan", lazy="selectin")
     almacenes_vetados = db.relationship("Almacen", secondary=tienda_almacenes_vetados, back_populates="vetado_por",
                                         order_by="Almacen.provincia")
+
+    @property
+    def ventana_txt(self):
+        return f"{self.dias_recepcion or 'L-V'} {self.ventana_inicio or '?'}–{self.ventana_fin or '?'}"
 
     @property
     def almacenes_vetados_txt(self):

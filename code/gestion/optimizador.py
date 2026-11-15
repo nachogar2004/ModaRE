@@ -23,7 +23,31 @@ from modare.planificador import cargar_plan
 from .modelos import Almacen, CamionReparto, CamionTroncal, LineaReposicion, Pedido, Reposicion, Viaje, db
 
 
-# ----------------------------------------------------------------------------- 1. ejecutar
+# ----------------------------------------------------------------------------- 0. plan de la red actual (la app)
+def calcular_rutas() -> bool:
+    """Calcula en un hilo el plan único de la red tal como está ahora: los kg/semana de todas las tiendas activas,
+    con los parámetros, vehículos y tarifas de la base. Se guarda como C.PLAN_ACTUAL (no crea viajes ni
+    reposiciones: la parte operativa no se usa). False si ya hay un cálculo en marcha."""
+    if not BD.reclamar_trabajo(C.PLAN_ACTUAL):
+        return False
+
+    def _run():
+        from modare.planificador import planificar
+        try:
+            plan = planificar(C.PLAN_ACTUAL, fuente="red", segundos=C.SEGUNDOS_BUSQUEDA,
+                              precio_co2=C.PRECIO_CO2_EUR_T, log=lambda *a: None)
+            r = plan["resumen"]
+            BD.poner_trabajo(C.PLAN_ACTUAL, "ok", f"{r['rutas']} rutas para {r['tiendas_con_demanda']} tiendas "
+                                                  f"en {r['segundos_calculo']:.0f} s")
+        except Exception as e:  # noqa: BLE001 — se enseña en la web
+            traceback.print_exc()
+            BD.poner_trabajo(C.PLAN_ACTUAL, "error", str(e))
+
+    threading.Thread(target=_run, daemon=True).start()
+    return True
+
+
+# ----------------------------------------------------------------------------- 1. ejecutar (ciclo semanal antiguo)
 def lanzar(app, semana: str, *, asignacion: str = "optimo", plantas_futuras: bool = False) -> bool:
     """Lanza la optimización en un hilo (con los datos que haya en la base en ese momento) e importa el plan."""
     # el estado vive en la base de datos: lo ve cualquier proceso del servidor y sobrevive a un reinicio

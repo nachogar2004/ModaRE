@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% from "gestion/_m.html" import icono, cabecera, kpi as tarjeta with context %}
+{% block title %}Panel · ReMode Studio{% endblock %}
+{% block head %}
+<style>
+  /* series categóricas (paleta de referencia validada; orden fijo: troncal, reparto, almacenes) */
+  .viz { --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --uno: var(--denim); --pista: var(--surface-2); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .viz { --s1: #3987e5; --s2: #d95926; --s3: #199e70; }
+  }
+  :root[data-theme="dark"] .viz { --s1: #3987e5; --s2: #d95926; --s3: #199e70; }
+
+  .viz h2 { margin-bottom: 2px; }
+  .viz .que { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; }
+  .s1 { background: var(--s1); } .s2 { background: var(--s2); } .s3 { background: var(--s3); } .uno { background: var(--uno); }
+
+  /* barra apilada de un solo total: segmentos separados por 2px de superficie, extremo final redondeado */
+  .apilada { display: flex; gap: 2px; height: 22px; margin: 4px 0 12px; }
+  .apilada > i { display: block; height: 100%; min-width: 2px; }
+  .apilada > i:last-child { border-radius: 0 4px 4px 0; }
+  .leyenda { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 13px; color: var(--ink-2); }
+  .leyenda b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  /* lista de barras: etiqueta | barra anclada a la izquierda | valor */
+  .bl { display: grid; grid-template-columns: minmax(90px, 30%) 1fr auto; gap: 6px 10px; align-items: center; font-size: 13px; }
+  .bl .et { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bl .eje { position: relative; height: 14px; border-left: 1px solid var(--line-2); }
+  .bl .eje > i { position: absolute; left: 0; top: 1px; height: 12px; border-radius: 0 4px 4px 0; }
+  .bl .eje > .pista { width: 100%; background: var(--pista); border-radius: 0 4px 4px 0; }
+  .bl .eje > .apil { display: flex; gap: 2px; background: none; top: 1px; }
+  .bl .eje > .apil > b { display: block; height: 12px; }
+  .bl .eje > .apil > b:last-child { border-radius: 0 4px 4px 0; }
+  .bl .v { color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+  .bl .v small { color: var(--muted); }
+  [data-tip] { cursor: default; }
+  [data-tip]:hover, [data-tip]:focus-visible { filter: brightness(1.08); outline: none; }
+
+  .tip { position: fixed; z-index: 50; pointer-events: none; background: var(--surface); color: var(--ink);
+         border: 1px solid var(--line-2); border-radius: 8px; box-shadow: var(--shadow-lg); padding: 6px 10px;
+         font-size: 12.5px; line-height: 1.45; max-width: 280px; white-space: pre-line; }
+  details.datos { margin-top: 12px; }
+  details.datos summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+  details.datos table { font-size: 12.5px; margin-top: 6px; }
+  .grid-2 > .card { min-width: 0; }
+</style>
+{% endblock %}
+{% block body %}
+{% call cabecera('Panel', 'Estado actual de la red y del último plan de rutas', eyebrow='Administración') %}
+  <a class="btn {{ 'sec' if plan else '' }}" href="{{ url_for('admin.panel') }}">{{ icono('zap') }}{{ 'Recalcular rutas' if plan else 'Calcular rutas' }}</a>
+  {% if plan %}<a class="btn" href="{{ url_for('plan') }}">{{ icono('map') }}Ver mapa</a>{% endif %}
+{% endcall %}
+
+<div class="viz">
+
+{# ------------------------------------------------------------------ cifras clave #}
+<div class="kpis">
+  {% if plan %}{% set r = plan.resumen %}
+    {{ tarjeta((r.coste_total_eur if r.coste_total_eur is defined else r.coste_eur)|miles ~ ' €', 'coste semanal total' ~ ((' · ' ~ r.eur_por_kg_total|miles(3) ~ ' €/kg') if r.eur_por_kg_total else ''), 'activity') }}
+    {{ tarjeta(red.tiendas, 'tiendas activas · ' ~ red.kg|miles ~ ' kg/semana', 'store') }}
+    {{ tarjeta(r.troncal.rutas + r.reparto.rutas, 'rutas a la semana · ' ~ r.camiones ~ ' camiones', 'route') }}
+    {{ tarjeta(r.km|miles, 'km a la semana', 'map') }}
+    {{ tarjeta(r.nivel_servicio|pct, 'de los kg llegan a tiempo', 'check-circle', tono='ok' if r.nivel_servicio and r.nivel_servicio >= r.nivel_servicio_objetivo else 'warn') }}
+  {% else %}
+    {{ tarjeta(red.tiendas, 'tiendas activas', 'store') }}
+    {{ tarjeta(red.kg|miles ~ ' kg', 'de ropa a repartir por semana', 'box') }}
+    {{ tarjeta(red.capacidad|miles ~ ' kg', red.plantas ~ ' plantas activas (capacidad)', 'factory') }}
+    {{ tarjeta(red.almacenes, 'almacenes activos', 'warehouse') }}
+  {% endif %}
+</div>
+{% if plan %}
+<p class="small">Plan de rutas calculado el {{ fecha.strftime('%d/%m/%Y a las %H:%M') if fecha else '—' }}.
+  Si has cambiado la red después, <a href="{{ url_for('admin.panel') }}">recalcula las rutas</a> para actualizar estas gráficas.</p>
+{% else %}
+<div class="alerta info">{{ icono('info') }}<div>Aún no hay rutas calculadas: abajo solo se ve la red.
+  <a href="{{ url_for('admin.panel') }}">Calcula las rutas</a> para ver costes, plantas, almacenes y flota.</div></div>
+{% endif %}
+
+{% if g %}
+{# ------------------------------------------------------------------ en qué se va el dinero #}
+{% set total = g.coste|sum(attribute=1) %}
+<div class="card">
+  <h2>En qué se va el dinero cada semana</h2>
+  <p class="que">{{ total|miles }} € en total: camiones planta → almacén (troncal), almacén → tienda (reparto) y alquiler y manipulación de los almacenes.</p>
+  <div class="apilada" role="img" aria-label="Reparto del coste semanal">
+    {% for nombre, v, s in g.coste %}<i class="{{ s }}" style="flex:{{ v }}" tabindex="0"
+       data-tip="{{ nombre }}&#10;{{ v|miles }} € · {{ (100 * v / total)|round|int if total else 0 }} %"></i>{% endfor %}
+  </div>
+  <div class="leyenda">
+    {% for nombre, v, s in g.coste %}<span><span class="sw {{ s }}"></span>{{ nombre }} <b>{{ v|miles }} €</b> · {{ (100 * v / total)|round|int if total else 0 }} %</span>{% endfor %}
+  </div>
+</div>
+
+<div class="grid-2">
+{# ------------------------------------------------------------------ plantas: carga frente a capacidad #}
+<div class="card">
+  <h2>Plantas: ropa que envían frente a su capacidad</h2>
+  <p class="que">kg por semana que el plan asigna a cada planta; la parte gris es capacidad libre.</p>
+  <div class="bl">
+    {% for p in g.plantas %}{% set f = (p.kg / p.capacidad) if p.capacidad else 0 %}
+      <span class="et" title="{{ p.nombre }}">{{ p.nombre }}</span>
+      <span class="eje"><i class="pista"></i><i class="uno" style="width:{{ [100 * f, 100]|min }}%" tabindex="0"
+        data-tip="{{ p.nombre }}&#10;{{ p.kg|miles }} de {{ p.capacidad|miles }} kg/semana ({{ (100 * f)|round|int }} %)&#10;{{ p.almacenes }} almacenes · {{ p.tiendas }} tiendas"></i></span>
+      <span class="v">{{ (100 * f)|round|int }} % <small>· {{ p.kg|miles }} kg</small></span>
+    {% endfor %}
+  </div>
+  <details class="datos"><summary>Ver datos</summary><table>
+    <thead><tr><th>Planta</th><th class="n">kg/semana</th><th class="n">Capacidad</th><th class="n">Almacenes</th><th class="n">Tiendas</th></tr></thead>
+    <tbody>{% for p in g.plantas %}<tr><td>{{ p.nombre }}</td><td class="n">{{ p.kg|miles }}</td><td class="n">{{ p.capacidad|miles }}</td><td class="n">{{ p.almacenes }}</td><td class="n">{{ p.tiendas }}</td></tr>{% endfor %}</tbody>
+  </table></details>
+</div>
+
+{# ------------------------------------------------------------------ flota #}
+<div class="card">
+  <h2>Vehículos que usa el plan</h2>
+  <p class="que">Rutas por semana de cada tipo de vehículo.
+    {% for op, n in g.operadores.items() %}{{ op }}: {{ n }} rutas{{ ' · ' if not loop.last }}{% endfor %}.</p>
+  <div class="leyenda" style="margin-bottom:10px">
+    <span><span class="sw s1"></span>Troncal (planta → almacén)</span><span><span class="sw s2"></span>Reparto (almacén → tienda)</span>
+  </div>
+  <div class="bl">
+    {% for t, d, a, b in g.tipos %}
+      <span class="et" title="{{ d }}">{{ d }}</span>
+      <span class="eje"><i class="apil" style="width:{{ 100 * (a + b) / g.tipos_max }}%">
+        {% if a %}<b class="s1" style="flex:{{ a }}" tabindex="0" data-tip="{{ d }} · troncal&#10;{{ a }} rutas"></b>{% endif %}
+        {% if b %}<b class="s2" style="flex:{{ b }}" tabindex="0" data-tip="{{ d }} · reparto&#10;{{ b }} rutas"></b>{% endif %}
+      </i></span>
+      <span class="v">{{ a + b }} <small>rutas</small></span>
+    {% endfor %}
+  </div>
+  <details class="datos"><summary>Ver datos</summary><table>
+    <thead><tr><th>Vehículo</th><th class="n">Troncal</th><th class="n">Reparto</th></tr></thead>
+    <tbody>{% for t, d, a, b in g.tipos %}<tr><td>{{ d }}</td><td class="n">{{ a }}</td><td class="n">{{ b }}</td></tr>{% endfor %}</tbody>
+  </table></details>
+</div>
+</div>
+
+{# ------------------------------------------------------------------ almacenes: coste por kg #}
+{% set top = g.almacenes[:12] %}
+{% set mxa = (top|map(attribute='eur_kg')|max) if top else 1 %}
+<div class="card">
+  <h2>Almacenes: lo que cuesta servir cada kg</h2>
+  <p class="que">Los {{ top|length }} almacenes con mayor coste por kg (de {{ g.almacenes|length }} con tiendas):
+    su alquiler y manipulación más las rutas de reparto que salen de él, entre los kg que reparte.</p>
+  <div class="leyenda" style="margin-bottom:10px">
+    <span><span class="sw s2"></span>Reparto</span><span><span class="sw s3"></span>Almacén (fijo + manipulación)</span>
+  </div>
+  <div class="bl">
+    {% for a in top %}
+      <span class="et" title="{{ a.nombre }}">{{ a.nombre }}</span>
+      <span class="eje"><i class="apil" style="width:{{ 100 * a.eur_kg / mxa }}%">
+        <b class="s2" style="flex:{{ a.reparto }}" tabindex="0" data-tip="{{ a.nombre }} · reparto&#10;{{ a.reparto|miles }} € ({{ (a.reparto / a.kg)|miles(3) }} €/kg)"></b>
+        <b class="s3" style="flex:{{ a.almacen }}" tabindex="0" data-tip="{{ a.nombre }} · almacén&#10;{{ a.almacen|miles }} € ({{ (a.almacen / a.kg)|miles(3) }} €/kg)"></b>
+      </i></span>
+      <span class="v">{{ a.eur_kg|miles(2) }} €/kg <small>· {{ a.kg|miles }} kg · {{ a.tiendas }} {{ 'tienda' if a.tiendas == 1 else 'tiendas' }}</small></span>
+    {% endfor %}
+  </div>
+  <details class="datos"><summary>Ver datos de todos los almacenes</summary><table>
+    <thead><tr><th>Almacén</th><th class="n">kg/semana</th><th class="n">Tiendas</th><th class="n">Reparto €</th><th class="n">Almacén €</th><th class="n">€/kg</th></tr></thead>
+    <tbody>{% for a in g.almacenes %}<tr><td>{{ a.nombre }}</td><td class="n">{{ a.kg|miles }}</td><td class="n">{{ a.tiendas }}</td><td class="n">{{ a.reparto|miles }}</td><td class="n">{{ a.almacen|miles }}</td><td class="n">{{ a.eur_kg|miles(3) }}</td></tr>{% endfor %}</tbody>
+  </table></details>
+</div>
+{% endif %}
+
+{# ------------------------------------------------------------------ red: demanda por provincia (siempre) #}
+{% set prov = red.provincias[:15] %}
+{% set mxp = (prov|map(attribute=1)|max) if prov else 1 %}
+<div class="card">
+  <h2>Dónde está la demanda</h2>
+  <p class="que">kg de ropa por semana que piden las tiendas activas de cada provincia (las {{ prov|length }} con más demanda de {{ red.provincias|length }}).
+    Tiendas: {% for k, n in red.por_tamano.items() %}{{ n }} {{ k ~ ('s' if n != 1 else '') }}{{ ', ' if not loop.last }}{% endfor %}.</p>
+  <div class="bl">
+    {% for nombre, kg, n in prov %}
+      <span class="et">{{ nombre }}</span>
+      <span class="eje"><i class="uno" style="width:{{ 100 * kg / mxp }}%" tabindex="0"
+        data-tip="{{ nombre }}&#10;{{ kg|miles }} kg/semana · {{ n }} {{ 'tienda' if n == 1 else 'tiendas' }}"></i></span>
+      <span class="v">{{ kg|miles }} kg <small>· {{ n }}</small></span>
+    {% endfor %}
+  </div>
+  <details class="datos"><summary>Ver todas las provincias</summary><table>
+    <thead><tr><th>Provincia</th><th class="n">kg/semana</th><th class="n">Tiendas</th></tr></thead>
+    <tbody>{% for nombre, kg, n in red.provincias %}<tr><td>{{ nombre }}</td><td class="n">{{ kg|miles }}</td><td class="n">{{ n }}</td></tr>{% endfor %}</tbody>
+  </table></details>
+</div>
+
+</div>
+
+<script>
+  /* tooltip de las gráficas: ratón y teclado */
+  (function () {
+    const tip = document.createElement("div");
+    tip.className = "tip"; tip.hidden = true; tip.setAttribute("role", "tooltip");
+    document.body.appendChild(tip);
+    const mostrar = (el, x, y) => {
+      tip.textContent = el.dataset.tip; tip.hidden = false;
+      const w = tip.offsetWidth, h = tip.offsetHeight;
+      tip.style.left = Math.min(x + 14, innerWidth - w - 8) + "px";
+      tip.style.top = (y - h - 12 < 8 ? y + 16 : y - h - 12) + "px";
+    };
+    document.querySelectorAll("[data-tip]").forEach(el => {
+      el.addEventListener("mousemove", e => mostrar(el, e.clientX, e.clientY));
+      el.addEventListener("mouseleave", () => tip.hidden = true);
+      el.addEventListener("focus", () => { const r = el.getBoundingClientRect(); mostrar(el, r.left + r.width / 2, r.top); });
+      el.addEventListener("blur", () => tip.hidden = true);
+    });
+  })();
+</script>
+{% endblock %}

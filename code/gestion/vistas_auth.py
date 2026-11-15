@@ -19,6 +19,10 @@ def entrar():
     if request.method == "POST":
         u = Usuario.query.filter_by(username=request.form.get("username", "").strip().lower()).first()
         if u and u.activo and u.check_password(request.form.get("password", "")):
+            if u.rol != "admin":
+                # la parte operativa (paneles de tienda, planta y almacén) no está en uso
+                flash("Esta aplicación solo la usa el administrador.", "error")
+                return render_template("gestion/entrar.html")
             login_user(u)
             u.ultimo_acceso = ahora()
             db.session.commit()

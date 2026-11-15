@@ -1,21 +1,20 @@
-# ReMode Studio · guía de la aplicación de gestión del transporte
+# ReMode Studio · guía de la aplicación de rutas
 
-**ReMode Studio** es la aplicación web de Moda re- para gestionar el transporte de ropa **planta → almacén → tienda**: el stock de cada punto,
-los pedidos de las tiendas (automáticos y adicionales), los camiones y la planificación semanal de rutas
-con el optimizador del repo (`code/modare`).
+**ReMode Studio** es la aplicación web de Moda re- para planificar el transporte de ropa **planta → almacén → tienda**.
+No trabaja por semanas ni con pedidos: describe la red **tal como está ahora** (tiendas, plantas, almacenes y cuánta
+ropa necesita cada tienda a la semana) y, al pulsar **Calcular rutas**, el optimizador del repo (`code/modare`)
+genera **un único plan de rutas** para toda la red: una semana tipo de lunes a viernes.
 
 - [1. Puesta en marcha](#1-puesta-en-marcha)
 - [2. Conceptos básicos](#2-conceptos-básicos)
-- [3. Usuarios y lo que puede hacer cada uno](#3-usuarios-y-lo-que-puede-hacer-cada-uno)
-- [4. La semana paso a paso](#4-la-semana-paso-a-paso)
-- [5. Pedidos automáticos](#5-pedidos-automáticos)
-- [6. Vetos: de dónde no quiero recibir ropa](#6-vetos-de-dónde-no-quiero-recibir-ropa)
-- [7. Alertas](#7-alertas)
-- [8. Cómo se conecta con el optimizador de rutas](#8-cómo-se-conecta-con-el-optimizador-de-rutas)
-- [9. Datos y tablas](#9-datos-y-tablas)
-- [10. Datos inventados (sintéticos)](#10-datos-inventados-sintéticos)
-- [11. Problemas frecuentes](#11-problemas-frecuentes)
-- [12. Uso real: base de datos y despliegue](#12-uso-real-base-de-datos-y-despliegue)
+- [3. La interfaz](#3-la-interfaz)
+- [4. Calcular las rutas paso a paso](#4-calcular-las-rutas-paso-a-paso)
+- [5. Vetos: de dónde no quiere recibir ropa cada uno](#5-vetos-de-dónde-no-quiere-recibir-ropa-cada-uno)
+- [6. Cómo se conecta con el optimizador de rutas](#6-cómo-se-conecta-con-el-optimizador-de-rutas)
+- [7. Datos y tablas](#7-datos-y-tablas)
+- [8. Datos inventados (sintéticos)](#8-datos-inventados-sintéticos)
+- [9. Problemas frecuentes](#9-problemas-frecuentes)
+- [10. Uso real: base de datos y despliegue](#10-uso-real-base-de-datos-y-despliegue)
 
 ---
 
@@ -29,22 +28,15 @@ Desde la carpeta `code/`:
 | Instalar | `.venv\Scripts\python -m pip install -r requirements.txt` | `.venv/bin/python -m pip install -r requirements.txt` |
 | Arrancar | `.venv\Scripts\python app.py` | `PORT=5050 .venv/bin/python app.py` |
 
-Abrir `http://127.0.0.1:5000` (o el puerto indicado; en macOS el 5000 lo ocupa AirPlay).
+Abrir `http://127.0.0.1:5000` (o el puerto indicado; en macOS el 5000 lo ocupa AirPlay) y entrar como
+**`admin` / `admin`** (cámbiala en *Mi cuenta*). La aplicación solo la usa el administrador.
 
 En desarrollo, la primera vez la app crea **`code/gestion.db`** (SQLite) con las migraciones y la rellena a partir
-de los CSV de `data/`: 175 tiendas, 6 plantas (4 activas), 38 almacenes, una flota inicial, un usuario por cada
-tienda, planta y almacén, y los datos del optimizador (parámetros, tipos de vehículo, tarifas y distancias).
+de los CSV de `data/`: 175 tiendas (con sus kg/semana estimados por ventas), 6 plantas (4 activas), 38 almacenes y
+los datos del optimizador (parámetros, tipos de vehículo, tarifas y distancias por carretera).
 A partir de ahí **la base de datos es la única fuente**: los CSV solo sirven para crearla. Para empezar de cero
 (por ejemplo, si cambian los CSV): `python -m gestion.semilla --reset` (¡borra todo lo hecho en la app!).
-Para uso real (PostgreSQL, servidor, copias) ver [§12](#12-uso-real-base-de-datos-y-despliegue).
-
-**Accesos iniciales** (cámbialos en *Mi cuenta*):
-
-| Usuario | Contraseña |
-|---|---|
-| `admin` | `admin` |
-| tiendas `td-001` … `td-175`, plantas `pl-mad`, `pl-val`…, almacenes `al-madrid`, `al-sevilla`… | `modare2026` |
-
+Para uso real (PostgreSQL, servidor, copias) ver [§10](#10-uso-real-base-de-datos-y-despliegue).
 Todas las variables de entorno están explicadas en [`code/.env.example`](../code/.env.example).
 
 ---
@@ -53,225 +45,95 @@ Todas las variables de entorno están explicadas en [`code/.env.example`](../cod
 
 ```
  PLANTA  ──camión troncal──▶  ALMACÉN  ──camión de reparto──▶  TIENDA
- (prendas)   (R12, R18, tráiler)  (cajas mixtas)   (furgoneta, 7,5 t…)    (prendas)
+            (R12, R18, tráiler)  (cross-dock,    (furgoneta, 7,5 t…)   (kg/semana)
+                                 uno por provincia)
 ```
 
-- **Categorías de prenda**: segmento (Mujer, Hombre, Niños) × tipo (partes de arriba, partes de abajo,
-  abrigos, zapatos, bolsos) = 15 categorías. El admin puede añadir más.
-- **Tiendas y plantas** guardan su stock en **prendas por categoría**.
-- **Almacenes** son puntos de paso (*cross-dock*): guardan **cajas mixtas** y tienen un **stock máximo**.
-- **Cajas**: la ropa viaja en cajas mixtas de ≈ 12,5 kg. Cada categoría tiene un peso medio por prenda,
-  así que `cajas = ⌈ Σ (prendas × kg por prenda) / 12,5 ⌉`.
-- **Semana de entrega**: semana ISO (`2026-W48`). Los pedidos se cierran el **viernes** anterior.
-- Hay **dos flotas distintas**: camiones troncales (con base en una planta) y camiones de reparto
-  (con base en un almacén). Los camiones grandes no entran en las ciudades.
+- Los camiones grandes no entran en las ciudades: la ropa va de la planta a un **almacén** y de ahí a las tiendas.
+- Cada tienda tiene un **kg/semana**: la ropa que necesita cada semana. Es lo que se reparte. De partida es una
+  estimación por sus ventas (ventas anuales ÷ 12 €/kg ÷ 50 semanas), y se cambia en su ficha.
+- El plan es **una semana tipo** con **todas las tiendas activas**: las grandes reciben 2 entregas por semana y el
+  resto 1, siempre dentro de su ventana de recepción, y respetando las capacidades de plantas, almacenes y
+  camiones y las normas de los conductores (pausas, jornada, descanso nocturno).
+- La ropa viaja en cajas de ≈ 12,5 kg sobre palés.
+- **No hay asociaciones fijas**: el optimizador decide qué almacén sirve a cada tienda y qué planta repone cada
+  almacén, buscando el menor coste. Solo se respetan los **vetos** (§5).
 
 ---
 
-## 3. Usuarios y lo que puede hacer cada uno
-
-Cada usuario solo ve su propia tienda, planta o almacén. El administrador lo ve todo y puede abrir el panel
-de cualquiera.
-
-### Cómo se usa la interfaz
-
-- **Menú lateral** agrupado (Operación, Red, Flota, Sistema para el admin). En el móvil se abre con el botón ☰.
-- **Pestañas** en los paneles de tienda, planta y almacén. El número junto a una pestaña indica lo pendiente
-  (pedidos activos, reposiciones por expedir…). La app recuerda la última pestaña abierta.
-- **Totales en vivo**: al registrar ventas o pedir, debajo de la tabla se ven las prendas, los kg y las cajas
-  aproximadas mientras se escribe.
-- **Buscadores** encima de las tablas largas: filtran al momento, sin recargar (ignoran tildes y mayúsculas).
-- **Avisos** arriba a la derecha: los de éxito se cierran solos; los de error se quedan hasta cerrarlos.
-- Los botones muestran que están trabajando y no se pueden pulsar dos veces. Las acciones que no tienen vuelta
-  atrás (expedir, cerrar semana, eliminar) piden confirmación.
-- **Modo oscuro** automático si el sistema lo usa.
-- **Marca**: logo RMS (letras de tela vaquera). La estética de la app sale de él: azul denim, contorno azul marino
-  y costuras doradas. Los ficheros están en `code/static/marca/`; el original y el script que quita el fondo y
-  genera los tamaños web, en `docs/marca/` (`python procesar_logo.py original.png carpeta_salida`, requiere Pillow).
-
-### Tienda
-
-| Sección | Para qué |
-|---|---|
-| **Stock actual** | Prendas por segmento × tipo y, debajo, cuántos días cubren al ritmo de venta actual. |
-| **Registrar ventas** | Resta del stock y alimenta el pedido automático. Se puede indicar la fecha (no futura). |
-| **Pedido adicional** | Pedido extra, por categoría, para una semana aún abierta. Se puede marcar como urgente y dejar un comentario. |
-| **Pedido automático** | Activarlo o no, frecuencia (diaria L-V / semanal / mensual), día y días de stock de seguridad. Muestra lo que pediría hoy. |
-| **Poner / quitar prendas** | Ajustes de inventario (recuentos, mermas, retiradas). Positivo suma, negativo resta. |
-| **Mis pedidos** | Histórico con estado, ruta y camión. Cancelar mientras esté *pendiente*; **Recibido** cuando llegue (suma el stock). Los pedidos en camino aparecen además en un aviso arriba del panel. |
-
-### Planta
-
-- Stock por categoría frente a su **stock máximo**.
-- **Poner / quitar prendas**: entradas de ropa clasificada, mermas, otros canales.
-- **Reposiciones a almacenes**: lo que tiene que enviar cada semana. **Expedir** descuenta el stock
-  (si no hay suficiente de alguna categoría, lo avisa y no deja expedir).
-- Sus rutas troncales, sus camiones y los almacenes que la han vetado.
-
-### Almacén
-
-- Cajas en stock frente al **máximo**, con lo previsto (entradas − salidas) para la semana.
-- **Entradas desde planta**: **Recibir** suma las cajas (avisa si se supera el máximo).
-- **Salidas a tiendas**: **Cargar en camión** pedido a pedido o **Cargar ruta** completa (resta cajas).
-- Sus vehículos de reparto, las tiendas servidas en el último plan y las que lo han vetado.
-- **Plantas vetadas**: de qué plantas no quiere recibir ropa (ver §6).
-
-### Administrador
+## 3. La interfaz
 
 | Menú | Qué hace |
 |---|---|
-| **Panel** | Indicadores, alertas, ocupación de plantas y almacenes; botón para generar pedidos automáticos. |
-| **Planificación** | El ciclo semanal (ver §4). |
-| **Pedidos** | Todos los pedidos, con filtros por semana, estado, tipo y tienda. |
-| **Tiendas, Plantas, Almacenes** | Alta, edición, baja. Al dar de alta se crea su usuario con contraseña aleatoria (se muestra una vez). En los almacenes, también sus costes (fijo semanal y manipulación) y el tiempo de descarga; en las tiendas, si están en la muestra de pruebas y la planta que las sirve hoy. |
-| **Optimizador → Parámetros, Tipos de vehículo, Tarifas** | Los supuestos con los que calcula el optimizador (kg por palé, jornada, frecuencias, capacidades y emisiones de cada vehículo, €/km, €/h, €/día…). Se editan, no se añaden ni se borran; el cambio entra en la siguiente optimización. |
-| **Camiones troncal / reparto** | Flotas por separado: matrícula, tipo, capacidad, operador, conductor, estado, ITV, km. |
-| **Usuarios** | Crear, editar, desactivar; asignar rol y tienda/planta/almacén. |
-| **Movimientos** | Auditoría de cada cambio de stock: quién, cuándo, cuánto y por qué. |
-| **Optimizador avanzado** | Herramienta avanzada original (escenarios con demanda estimada, mapa y analítica). |
+| **Rutas → Panel** (inicio) | Estado actual de un vistazo, con gráficas: coste semanal y en qué se va (troncal, reparto, almacenes), carga de cada planta frente a su capacidad, vehículos que usa el plan, los almacenes que más cuesta servir por kg y dónde está la demanda por provincia. Pasa el ratón por una barra para ver el detalle; cada gráfica tiene «Ver datos» con la tabla. Sin plan calculado solo muestra la red. |
+| **Rutas → Calcular rutas** | Resumen de la red (tiendas, kg/semana, capacidad de las plantas), botón **Calcular rutas** y resultado del último cálculo: coste total con almacenes, transporte, almacenes, rutas, km y entregas a tiempo. |
+| **Rutas → Mapa y analítica** | El plan sobre el mapa, la lista de rutas con sus paradas y horarios, y la descarga de paradas en CSV. |
+| **Red → Tiendas, Plantas, Almacenes** | Alta, edición y baja. En tiendas: kg/semana, ubicación, ventana de recepción, vehículo máximo, vetos. En plantas: capacidad de salida y horario. En almacenes: capacidad, horario, costes y vetos. |
+| **Optimizador → Parámetros, Tipos de vehículo, Tarifas** | Los supuestos con los que calcula el optimizador (kg por palé, jornada, frecuencias, capacidades y emisiones de cada vehículo, €/km, €/h, €/día…). Se editan, no se añaden ni se borran. |
+| **Sistema → Usuarios** | Cuentas de administrador. |
 
-**Eliminar**: si el elemento no tiene historial se borra; si lo tiene (ventas, pedidos, viajes,
-movimientos…) se **da de baja** y se conserva el histórico. Los dados de baja se ven con
-*Mostrar también los dados de baja*. El admin no puede quitarse su propio rol ni dejar el sistema sin administradores.
+**Eliminar**: una tienda, planta o almacén se borra de verdad salvo que tenga historial operativo antiguo
+(pedidos, movimientos); en ese caso se **da de baja** (desactivada), que para las rutas es lo mismo: no entra en el
+cálculo. Los dados de baja se ven con *Mostrar dados de baja* y se pueden reactivar.
 
 ---
 
-## 4. La semana paso a paso
+## 4. Calcular las rutas paso a paso
 
-Ejemplo para entregar en la semana **W48**:
+1. **Ajusta la red**: cambia los kg/semana de las tiendas, da de alta o de baja tiendas, plantas o almacenes, o
+   cambia parámetros y tarifas. Cada cambio queda guardado en la base de datos.
+2. Si has **añadido o movido** una tienda, planta o almacén, en *Calcular rutas* aparece un aviso con el botón
+   **Calcular distancias (OSRM)**: calcula solo las distancias por carretera de esos puntos (unos segundos por punto).
+   Si no lo haces, el optimizador usa para ellos la línea recta × 1,26.
+3. Pulsa **Calcular rutas**. Tarda 1–2 minutos; la página se actualiza sola al terminar.
+4. Revisa el resultado y abre **Mapa y analítica** para ver cada ruta.
+5. Si después cambias algo, la página avisa de que **el plan ya no refleja la red actual**: vuelve a pulsar
+   *Calcular rutas*. Cada cálculo sustituye al anterior (solo hay un plan).
 
-```
- W47 lun-vie                     W47 viernes (admin)                      W48
- ───────────────────────────     ──────────────────────────────────       ─────────────────────────────────────
- tiendas venden y piden    ──▶   1 Cerrar semana W48               ──▶    planta expide ─▶ almacén recibe
- pedidos automáticos             2 Optimizar e importar rutas             almacén carga ─▶ tienda recibe
- (estado: pendiente)             3 Revisar camiones asignados
-```
-
-1. **Cerrar semana** (*Planificación*). Los pedidos pendientes pasan a *confirmado* y se suman por tienda en la
-   tabla que lee el optimizador. Desde ese momento las tiendas ya no pueden pedir para esa semana.
-2. **Optimizar e importar rutas**. Se exportan tiendas, plantas, almacenes y los vetos a `data/`,
-   se ejecuta el optimizador (1–2 min, la página se refresca sola) y se importa su resultado:
-   - una **ruta** por camión y día (`T-MAD-01` troncal desde Madrid, `R-SEVILLA-02` reparto desde Sevilla);
-   - cada ruta recibe un **camión libre** de su base: primero uno del mismo tipo y, si no hay, el más pequeño con
-     capacidad suficiente. Se puede cambiar a mano. Las rutas sin camión salen en rojo y como alerta;
-   - una **reposición** por almacén: la planta que el optimizador eligió, las cajas y la mezcla de prendas de los
-     pedidos de las tiendas que ese almacén reparte;
-   - los pedidos pasan a *planificado*, con su ruta y su almacén.
-3. **Ejecución**:
-
-| Quién | Acción | Efecto |
-|---|---|---|
-| Planta | Expedir reposición | − prendas en planta; la ruta troncal pasa a *en curso* |
-| Almacén | Recibir reposición | + cajas en almacén |
-| Almacén | Cargar pedido / ruta | − cajas en almacén; pedido *en reparto* |
-| Tienda | Confirmar recepción | + prendas en tienda; pedido *entregado* |
-
-Cuando todo lo que lleva una ruta está entregado, la ruta pasa a *completada*, su camión vuelve a *disponible*
-y se le suman los km.
-
-- **Ver mapa y analítica** abre el plan del optimizador (rutas sobre carretera, cronograma, costes).
-- **Reabrir semana** borra rutas y reposiciones y devuelve los pedidos a *pendiente*. Solo se puede si aún no
-  ha salido nada.
-- **Volver a volcar pedidos** incluye pedidos nuevos sin perder los ya planificados. Después hay que volver a
-  optimizar.
-
-**Estados de un pedido**: `pendiente → confirmado → planificado → en reparto → entregado` (o `cancelado`).
+Si las tiendas piden más ropa de la que pueden enviar las plantas activas, la página lo avisa antes de calcular:
+sube la capacidad de alguna planta o activa otra.
 
 ---
 
-## 5. Pedidos automáticos
+## 5. Vetos: de dónde no quiere recibir ropa cada uno
 
-Cada tienda elige **cuándo** se genera su pedido:
+Por defecto **cualquier planta puede reponer cualquier almacén y cualquier almacén puede servir a cualquier tienda**.
+Lo único que se configura son **vetos**, en la ficha de cada uno:
 
-| Frecuencia | Día de pedido | Periodo que cubre |
-|---|---|---|
-| Diaria | de lunes a viernes | 1 día |
-| Semanal | 0 = lunes … 6 = domingo | 7 días |
-| Mensual | día del mes, 1–28 | 30 días |
-
-El día que toca, para **cada categoría**:
-
-```
-pedido = venta media diaria (últimas 4 semanas) × (días del periodo + días de seguridad)
-         − stock actual − lo ya pedido que aún no ha llegado
-```
-
-- Si el total pesa menos de media caja, no se genera.
-- Se generan solos con la primera visita a la app de cada día (o con el botón del panel del admin).
-  No se duplican: la app recuerda el último día procesado.
-- Lo generado de lunes a viernes se entrega la semana siguiente. Lo del fin de semana, la otra.
-  Si la app ha estado días sin abrirse, lo atrasado va a la primera semana aún abierta.
-- Los **pedidos adicionales** se suman al automático. Ambos aparecen por separado en el histórico.
-
----
-
-## 6. Vetos: de dónde no quiero recibir ropa
-
-No hay asociaciones fijas: **cualquier planta puede reponer cualquier almacén y cualquier almacén puede servir
-a cualquier tienda**. Cada semana el optimizador elige la combinación más barata que respeta capacidades.
-
-Lo único que se configura son **vetos**, y los decide cada uno desde su panel (el admin también puede, en la ficha):
-
-| Quién | Dónde | Qué veta |
-|---|---|---|
-| Tienda | pestaña *Almacenes vetados* | almacenes de los que no quiere recibir ropa |
-| Almacén | pestaña *Plantas vetadas* | plantas de las que no quiere recibir ropa |
-
-- Por defecto no hay ningún veto. Los cambios se aplican en la **siguiente planificación**.
-- Si una tienda veta los almacenes más cercanos, la sirve uno más lejano (más caro).
-- Un almacén que veta **todas** las plantas activas no recibe mercancía: el optimizador no lo usa y reparte
-  sus tiendas a otros almacenes. Sale como alerta en rojo.
-- Una tienda que veta **todos** los almacenes que pueden recibir mercancía no se puede servir: sus pedidos se
-  quedan sin ruta, con aviso en el plan y alerta en rojo.
-- Cada pedido tiene almacén solo cuando el optimizador se lo asigna; el panel del almacén muestra las tiendas que
-  ha servido en el último plan y las que lo han vetado.
-
-## 7. Alertas
-
-| Alerta | Dónde se ve |
+| Ficha | Qué veta |
 |---|---|
-| Almacén por encima de su máximo, al ≥ 90 % o que lo superaría con lo pendiente | admin, almacén |
-| Almacén que ha vetado todas las plantas activas | admin, almacén |
-| Tienda que ha vetado todos los almacenes disponibles | admin, tienda |
-| Planta por encima de su stock máximo o al ≥ 90 % | admin, planta |
-| Planta sin stock suficiente para las reposiciones planificadas | admin, planta |
-| Tienda con categorías agotadas | tienda |
-| ITV caducada o que vence en 30 días | admin |
-| Rutas planificadas sin camión asignado | admin |
+| Tienda → *Almacenes vetados* | almacenes de los que no quiere recibir ropa |
+| Almacén → *Plantas vetadas* | plantas de las que no quiere recibir ropa |
 
-Superar un máximo **no bloquea** la operación (la mercancía ya ha llegado físicamente), pero queda señalado.
+- Si una tienda veta los almacenes más cercanos, la sirve uno más lejano (más caro).
+- Un almacén que veta **todas** las plantas activas no recibe mercancía: el optimizador no lo usa.
+- Una tienda que veta **todos** los almacenes que pueden recibir mercancía no se puede servir: sale en los avisos
+  del plan.
 
 ---
 
-## 8. Cómo se conecta con el optimizador de rutas
+## 6. Cómo se conecta con el optimizador de rutas
 
-El optimizador es el paquete `code/modare`. La app habla con él **solo a través de
-`code/gestion/optimizador.py`**. Si se sustituye la librería, solo hay que adaptar ese fichero.
+El optimizador es el paquete `code/modare`. La app lo lanza **solo desde `code/gestion/optimizador.py`**
+(`calcular_rutas()`), y el optimizador lee **todos sus datos de la base de datos** en el momento de empezar
+(`modare/datos.py:cargar_datos`): lo que se cambia en la app entra en el siguiente cálculo, sin exportar nada.
 
 | Dirección | Qué | Dónde |
 |---|---|---|
-| App → librería | pedidos de la semana, en kg y cajas por tienda | tabla `pedidos_optimizador` (misma base de datos) |
-| App → librería | tiendas, plantas, almacenes y sus vetos (altas, bajas, cambios) | sus tablas (`tiendas`, `plantas`, `almacenes`, `*_vetad*`) |
-| App → librería | parámetros, tipos de vehículo, tarifas | tablas `parametros`, `tipos_vehiculo`, `tarifas` (Admin → Optimizador) |
-| App → librería | distancias por carretera | tabla `distancias` (botón «Calcular distancias» en Planificación) |
-| Librería → app | rutas, paradas, almacén y planta asignados, KPIs | tabla `planes` (y copia en `code/salidas/<semana>/`: `plan.json`, CSV, `mapa.html`) |
-| Ambas | estado de cada optimización (calculando / ok / error) | tabla `trabajos_optimizacion` |
+| App → librería | tiendas (con sus kg/semana), plantas, almacenes y vetos | sus tablas (`tiendas`, `plantas`, `almacenes`, `*_vetad*`) |
+| App → librería | parámetros, tipos de vehículo, tarifas | tablas `parametros`, `tipos_vehiculo`, `tarifas` |
+| App → librería | distancias por carretera | tabla `distancias` |
+| Librería → app | el plan: rutas, paradas, almacén y planta asignados, costes y KPIs | tabla `planes`, clave `ACTUAL` (y copia en `code/salidas/ACTUAL/`) |
+| Ambas | estado del cálculo (calculando / ok / error) | tabla `trabajos_optimizacion` |
 
-- No hay que exportar nada: cada optimización lee la base de datos en ese momento, así que cualquier cambio
-  hecho en la app (una tienda nueva, un veto, una tarifa, un parámetro) entra en la siguiente optimización.
-- **Parámetros, tipos de vehículo y tarifas** (menú *Optimizador*) se pueden editar pero no añadir ni borrar,
-  porque el optimizador los necesita todos. Un parámetro numérico no admite texto.
-- Si se añade o se mueve una tienda, planta o almacén, sus distancias por carretera dejan de valer: la app las
-  borra y en *Planificación* aparece un aviso con el botón **Calcular distancias (OSRM)**, que calcula solo las
-  de esos puntos (unos segundos por punto). Mientras tanto el optimizador usa línea recta × 1,26. Lo mismo desde
-  la consola: `python calcular_distancias.py`.
-- Las tiendas sin acceso por carretera (Baleares) quedan fuera de las rutas. Se avisan y su pedido se puede
-  cargar a mano.
+- El tiempo de búsqueda es fijo (30 s por planta) y el CO₂ no se penaliza: el plan minimiza el coste.
+- Las tiendas sin acceso por carretera (islas) quedan fuera de las rutas y salen en los avisos.
+- Desde la consola se obtiene el mismo plan con `python optimizar.py` (y escenarios con `--muestra`,
+  `--asignacion actual`, `--plantas-futuras`, `--almacenes optimo`…).
 
 ---
 
-## 9. Datos y tablas
+## 7. Datos y tablas
 
 **Una sola base de datos** para la app y la librería de rutas (variable `MODARE_DB`; en desarrollo `code/gestion.db`,
 que no se sube a git). Modelos en `code/gestion/modelos.py` y `code/modare/bd.py`; el esquema lo crean y actualizan
@@ -279,78 +141,58 @@ las migraciones de `code/migrations/`.
 
 | Tabla | Contenido |
 |---|---|
-| `usuarios` | usuario, contraseña cifrada, rol, tienda/planta/almacén, activo, último acceso |
-| `categorias` | segmento, tipo, kg y € por prenda, cuota de ventas |
-| `plantas`, `stock_planta` | ubicación, capacidad de salida kg/semana, **stock máximo**, horario; stock por categoría |
-| `almacenes` | ubicación, **stock actual y máximo en cajas**, capacidad kg/semana, horario, planta del último plan |
-| `almacen_plantas_vetadas`, `tienda_almacenes_vetados` | vetos: plantas que cada almacén no quiere y almacenes que cada tienda no quiere |
-| `tiendas`, `stock_tienda` | ubicación, tamaño, ventana de recepción, vehículo máximo, configuración del pedido automático, capacidad, contacto; stock por categoría |
-| `ventas` | ventas diarias por tienda y categoría |
-| `pedidos`, `lineas_pedido` | tipo (automático/adicional), estado, semana, urgente, almacén y ruta; prendas por categoría |
-| `camiones_troncal` | camiones planta → almacén (base: planta) |
-| `camiones_reparto` | vehículos almacén → tienda (base: almacén) |
-| `viajes` | rutas del plan con horario, km, coste, CO₂ y camión asignado |
-| `reposiciones`, `lineas_reposicion` | envíos planta → almacén y su mezcla de prendas |
-| `movimientos` | auditoría de cada cambio de stock |
-| `ajustes` | estado interno (semanas cerradas, último día de pedidos automáticos) |
-| `pedidos_optimizador` | (librería) pedido semanal de cada tienda en kg y cajas: la entrada del optimizador |
-| `planes` | (librería) el plan de cada semana en JSON |
-| `trabajos_optimizacion` | (librería) estado de cada optimización; una «calculando» de más de 30 min se da por interrumpida |
+| `tiendas` | ubicación, tamaño, **kg/semana**, ventas anuales (informativo), ventana de recepción, vehículo máximo, contacto, activa |
+| `plantas` | ubicación, capacidad de salida kg/semana, horario de carga, activa |
+| `almacenes` | ubicación, capacidad kg/semana, horario, tiempo de descarga, coste fijo y de manipulación, activo |
+| `almacen_plantas_vetadas`, `tienda_almacenes_vetados` | vetos |
+| `parametros`, `tipos_vehiculo`, `tarifas`, `distancias` | datos del optimizador |
+| `planes`, `trabajos_optimizacion` | el plan y el estado del cálculo |
+| `usuarios`, `ajustes` | cuentas y estado interno (p. ej. cuándo cambió la red por última vez) |
 | `alembic_version` | versión del esquema (migraciones) |
 
-Código: `gestion/vistas_*.py` (pantallas), `gestion/logistica.py` (reglas de negocio),
-`gestion/optimizador.py` (puente con la librería), `gestion/semilla.py` (carga inicial), `gestion/basedatos.py`
-(preparación de la base y migraciones), `modare/bd.py` (tablas de la librería),
-`templates/gestion/` (HTML), `static/remode.css` y `static/remode.js` (diseño e interacción, sin dependencias).
+Quedan en la base, **sin uso en la interfaz**, las tablas de la antigua parte operativa (pedidos, stock, ventas,
+categorías de prenda, camiones, viajes, reposiciones, movimientos) y su código (`gestion/logistica.py`,
+`gestion/vistas_red.py`), por si se recupera.
 
 ---
 
-## 10. Datos inventados (sintéticos)
+## 8. Datos inventados (sintéticos)
 
-Para que la app funcione desde el primer día, la carga inicial **inventa** lo que el reto no da. Todo se puede
-cambiar desde la app y conviene sustituirlo por datos reales:
+La carga inicial **inventa** lo que el reto no da; todo se puede cambiar en la app:
 
-- peso, precio y cuota de ventas de cada categoría de prenda;
-- 8 semanas de ventas por tienda y categoría, a partir de sus ventas anuales;
-- stock inicial: tiendas ≈ 4 días de venta; plantas al 60 % de un máximo de 3 semanas de salida;
-  almacenes al 25 % de un máximo de 2 semanas de capacidad;
-- frecuencia de pedido: tiendas pequeñas mensual (día 1), el resto semanal (jueves);
-- flota: 3 camiones troncales por planta activa (más un tráiler en Barcelona); 1 furgoneta por almacén y
-  un rígido de 7,5 t si mueve ≥ 3.000 kg/semana; matrículas ficticias.
+- los **kg/semana** de cada tienda (estimados por sus ventas, también sintéticas);
+- los **almacenes**: uno por provincia, en su polígono industrial principal, con capacidad y costes estimados;
+- muchos **parámetros** (frecuencias, kg por palé, ventanas por defecto…): ver su etiqueta en *Parámetros*.
 
 ---
 
-## 11. Problemas frecuentes
+## 9. Problemas frecuentes
 
 | Problema | Solución |
 |---|---|
 | «Formulario caducado» / error 400 | La sesión ha cambiado (p. ej. se reinició el servidor). Recarga la página. |
-| Las rutas del mapa salen en línea recta | No se pudo pedir el trazado a OSRM (sin red o certificados). En macOS se resuelve con `certifi`, ya incluido en `requirements.txt`. Reoptimiza la semana. |
 | «Asignación infactible» | La demanda supera la capacidad de los almacenes o de las plantas que no están vetadas. Revisa capacidades y vetos. |
-| Una ruta «sin camión» | No hay un camión libre en esa base a esa hora. Añade uno en *Camiones* o asígnalo a mano en *Planificación*. |
-| Una tienda no pide automáticamente | Revisa que tenga el pedido automático activo, que sea su día y que tenga ventas registradas en las últimas 4 semanas. |
-| No deja expedir una reposición | La planta no tiene stock suficiente de alguna categoría: registra la entrada de prendas. |
+| Las rutas del mapa salen en línea recta | No se pudo pedir el trazado a OSRM (sin red o certificados). En macOS se resuelve con `certifi`, ya incluido en `requirements.txt`. Vuelve a calcular. |
+| «La optimización se interrumpió» | Se reinició el servidor mientras calculaba. Vuelve a pulsar *Calcular rutas*. |
+| Una tienda no aparece en las rutas | Revisa que esté activa, con kg/semana > 0 y con acceso por carretera, y que no haya vetado todos los almacenes. |
 | Puerto 5000 ocupado (macOS) | `PORT=5050 .venv/bin/python app.py` |
 
-### Pendiente / límites conocidos
+### Límites conocidos
 
-- La librería supone que lo repuesto en la semana W se reparte en W+1; la app hoy hace ambas cosas en la misma semana.
-- Un pedido que el optimizador reparte en varias entregas se asocia a la primera ruta.
 - No hay límite de intentos de inicio de sesión: conviene ponerlo en el proxy (nginx, Cloudflare…).
-- La optimización corre en un hilo del proceso web: si el servidor se reinicia mientras calcula, queda marcada
-  como interrumpida y hay que relanzarla. Para muchos usuarios a la vez, moverla a una cola de tareas (RQ, Celery).
-- `code/salidas/` se escribe en el disco del servidor; la app no depende de ello para funcionar (los planes están
-  en la base), pero el mapa HTML de `salidas/` se pierde si el disco es efímero.
+- El cálculo corre en un hilo del proceso web: si el servidor se reinicia mientras calcula, queda marcado como
+  interrumpido y hay que relanzarlo.
+- `code/salidas/` se escribe en el disco del servidor; la app no depende de ello (el plan está en la base).
 
 ---
 
-## 12. Uso real: base de datos y despliegue
+## 10. Uso real: base de datos y despliegue
 
 ### Dónde están los datos
 
 | Qué | Dónde |
 |---|---|
-| Todo lo de la app y del optimizador (usuarios, stock, pedidos, rutas, planes, estado de las optimizaciones) | **la base de datos** de `MODARE_DB` |
+| Todo lo de la app y del optimizador (red, kg/semana, usuarios, plan de rutas, estado del cálculo) | **la base de datos** de `MODARE_DB` |
 | Red, vetos y datos del modelo (parámetros, vehículos, tarifas, distancias) | **la base de datos** (los edita la app) |
 | Semilla con la que se crea una base nueva | `data/*.csv` en git (solo se leen al crear la base) |
 | Copias legibles de cada plan (mapa, CSV) | `code/salidas/<semana>/` (prescindibles) |

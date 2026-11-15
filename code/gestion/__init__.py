@@ -4,7 +4,6 @@ Se monta sobre la app Flask de code/app.py con `init_app(app)`.
 """
 from __future__ import annotations
 
-import datetime as dt
 import os
 import secrets
 from functools import wraps
@@ -55,7 +54,7 @@ def comprobar_acceso(rol: str, entidad_id: str):
 
 def inicio_de(u: Usuario) -> str:
     if u.rol == "admin":
-        return url_for("admin.panel")
+        return url_for("admin.resumen")
     if u.rol == "tienda":
         return url_for("tienda.panel", tid=u.tienda_id)
     if u.rol == "planta":
@@ -98,15 +97,7 @@ def init_app(app):
         app.register_blueprint(bp)
 
     app.before_request(_comprobar_csrf)
-
-    @app.before_request
-    def _automaticos_diarios():
-        """Una vez al día (con la primera petición) se generan los pedidos automáticos que tocan."""
-        hoy = dt.date.today().isoformat()
-        if app.config.get("_auto_hoy") != hoy and request.endpoint not in (None, "static"):
-            from .logistica import generar_automaticos
-            app.config["_auto_hoy"] = hoy
-            generar_automaticos()
+    # (los pedidos automáticos diarios ya no se generan: la app trabaja con los kg/semana de cada tienda, sin semanas)
 
     @app.errorhandler(400)
     @app.errorhandler(403)

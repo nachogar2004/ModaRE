@@ -57,11 +57,16 @@ if not _ES_HIJO:
 
 
 def _sem(v: str | None) -> str:
-    """La semana se usa en rutas de fichero: solo se acepta el formato ISO AAAA-Www."""
+    """La semana se usa en rutas de fichero: solo se acepta el formato ISO AAAA-Www (o el plan actual)."""
     v = v or PED.semana_actual()
-    if not re.fullmatch(r"\d{4}-W\d{2}", v):
+    if v != C.PLAN_ACTUAL and not re.fullmatch(r"\d{4}-W\d{2}", v):
         abort(400, "Semana con formato AAAA-Www, p.ej. 2026-W47")
     return v
+
+
+def _plan_sem(v: str | None) -> str:
+    """Las vistas de un plan muestran por defecto el plan de la red actual (el que calcula la app)."""
+    return _sem(v or C.PLAN_ACTUAL)
 
 
 def _datos():
@@ -123,10 +128,11 @@ def estado():
 @login_required
 @rol_requerido()
 def plan():
-    semana = _sem(request.args.get("semana"))
+    semana = _plan_sem(request.args.get("semana"))
     p = cargar_plan(semana)
     if not p:
-        abort(404)
+        flash("Aún no hay rutas calculadas: pulsa «Calcular rutas».", "error")
+        return redirect(url_for("admin.panel"))
     return render_template("plan.html", semana=semana, plan=p)
 
 
@@ -134,7 +140,7 @@ def plan():
 @login_required
 @rol_requerido()
 def plan_json():
-    p = cargar_plan(_sem(request.args.get("semana")))
+    p = cargar_plan(_plan_sem(request.args.get("semana")))
     return jsonify(p) if p else abort(404)
 
 
@@ -143,7 +149,7 @@ def plan_json():
 @rol_requerido()
 def paradas_csv():
     """Se genera desde el plan guardado en la base de datos (no depende de que exista el fichero en disco)."""
-    semana = _sem(request.args.get("semana"))
+    semana = _plan_sem(request.args.get("semana"))
     plan = cargar_plan(semana)
     if not plan:
         abort(404)

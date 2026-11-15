@@ -141,7 +141,7 @@ def cargar_datos(distancias: bool = True) -> Datos:
 
     tiendas = _vacios_a_nulo(_sql(
         "SELECT id AS id_tienda, nombre, subtipo, direccion, municipio, provincia, ccaa, lat, lon, acceso_carretera, "
-        "superficie_m2, categoria_tamano, ventas_anuales_eur AS ventas_periodo, dias_recepcion, ventana_inicio, "
+        "superficie_m2, categoria_tamano, ventas_anuales_eur AS ventas_periodo, kg_semana, dias_recepcion, ventana_inicio, "
         "ventana_fin, tiempo_descarga_min, vehiculo_max, en_muestra, planta_actual, activa FROM tiendas ORDER BY id"))
     for c in ("acceso_carretera", "en_muestra", "activa"):
         tiendas[c] = tiendas[c].astype(int)
@@ -223,6 +223,17 @@ def kg_semana_estimado(tienda: pd.Series, P: dict) -> float:
     if tienda.ventas_unidad == "INDICE":
         ventas = ventas / 100 * P["ventas_media_eur_tienda"]
     return ventas / P["precio_medio_eur_kg"] / P["semanas_venta_anio"]
+
+
+def demanda_red(d: Datos) -> dict[str, float]:
+    """La demanda de la app: los kg/semana de cada tienda activa, todas a la vez (sin semanas ni alternancias).
+    Una tienda sin kg/semana usa la estimación por ventas."""
+    out = {}
+    for t in d.tiendas.itertuples():
+        kg = t.kg_semana if pd.notna(t.kg_semana) else kg_semana_estimado(pd.Series(t._asdict()), d.P)
+        if kg > 0:
+            out[t.id_tienda] = round(float(kg), 1)
+    return out
 
 
 def demanda_estimada(d: Datos, semana_iso: int) -> dict[str, float]:

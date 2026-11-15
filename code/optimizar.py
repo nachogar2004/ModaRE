@@ -1,9 +1,9 @@
-"""CLI: genera el plan de rutas de una semana con los datos de la base de datos (los mismos que ve la app).
+"""CLI: genera el plan de rutas con los datos de la base de datos (los mismos que ve la app).
 
-    python optimizar.py                       # semana siguiente, pedidos + estimación
-    python optimizar.py --semana 2026-W47 --segundos 60
-    python optimizar.py --fuente estimacion --muestra --segundos 10   # prueba rápida
+    python optimizar.py                       # plan de la red actual: kg/semana de todas las tiendas (= botón de la app)
+    python optimizar.py --muestra --segundos 10   # prueba rápida con las tiendas de la muestra
     python optimizar.py --asignacion actual   # compara con la asignación tienda-planta de hoy
+    python optimizar.py --fuente estimacion --semana 2026-W47   # modo antiguo por semanas (ventas, alternancia)
 """
 import argparse
 import sys
@@ -15,8 +15,9 @@ from modare.planificador import planificar
 
 def main():
     ap = argparse.ArgumentParser(description="Optimizador de rutas Moda re-")
-    ap.add_argument("--semana", help="ISO, p.ej. 2026-W47 (por defecto: la siguiente)")
-    ap.add_argument("--fuente", choices=["mixto", "pedidos", "estimacion"], default="mixto")
+    ap.add_argument("--fuente", choices=["red", "mixto", "pedidos", "estimacion"], default="red",
+                    help="red (por defecto): kg/semana de cada tienda, plan único; el resto, modo antiguo por semanas")
+    ap.add_argument("--semana", help="Solo con las fuentes por semanas: ISO, p.ej. 2026-W47 (por defecto: la siguiente)")
     ap.add_argument("--asignacion", choices=["optimo", "actual"], default="optimo")
     ap.add_argument("--plantas-futuras", action="store_true", help="Incluye Asturias y Santiago")
     ap.add_argument("--segundos", type=int, default=C.SEGUNDOS_BUSQUEDA,

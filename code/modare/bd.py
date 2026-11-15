@@ -108,6 +108,12 @@ def cargar_plan(semana: str) -> dict | None:
     return json.loads(texto) if texto else None
 
 
+def fecha_plan(semana: str) -> dt.datetime | None:
+    """Cuándo se guardó el plan (None si no hay)."""
+    with engine().connect() as con:
+        return con.execute(sa.select(planes.c.actualizado).where(planes.c.semana == semana)).scalar()
+
+
 # ----------------------------------------------------------------------------- estado de las optimizaciones
 def poner_trabajo(semana: str, estado: str, mensaje: str | None = None):
     with engine().begin() as con:

@@ -10,10 +10,16 @@
 {% endblock %}
 {% block body %}
 {% set r = plan.resumen %}
+{% if r.fuente == 'red' %}
+<h1>Plan de rutas · red actual</h1>
+<p class="muted">Semana tipo con los kg/semana de {{ r.tiendas_con_demanda }} tiendas · calculado en {{ r.segundos_calculo }} s ·
+  <a href="{{ url_for('paradas_csv', semana=semana) }}">descargar paradas.csv</a> · <a href="{{ url_for('admin.panel') }}">volver</a></p>
+{% else %}
 <h1>Plan de rutas · {{ semana }}</h1>
 <p class="muted">Demanda: {{ r.fuente }} ({{ r.pedidos_app }} pedidos de la app) · asignación {{ r.asignacion }} ·
   {{ r.segundos_por_planta }} s/planta · calculado en {{ r.segundos_calculo }} s ·
-  <a href="{{ url_for('paradas_csv', semana=semana) }}">descargar paradas.csv</a> · <a href="{{ url_for('central', semana=semana) }}">volver</a></p>
+  <a href="{{ url_for('paradas_csv', semana=semana) }}">descargar paradas.csv</a> · <a href="{{ url_for('admin.panel') }}">volver</a></p>
+{% endif %}
 
 <div class="kpis card">
   {% if r.coste_total_eur is defined %}
@@ -29,7 +35,7 @@
   <div class="kpi"><div class="v">{{ '%.1f'|format(100 * r.nivel_servicio) ~ ' %' if r.nivel_servicio is not none else '–' }}</div><div class="l">servicio (objetivo {{ '%.0f'|format(100 * r.nivel_servicio_objetivo) }} %)</div></div>
 </div>
 
-<div class="card"><div id="mapa"></div><p class="muted">Pincha una ruta de la tabla para resaltarla. Las líneas son rectas entre paradas (no el trazado por carretera).</p></div>
+<div class="card"><div id="mapa"></div><p class="muted">Pincha una ruta de la tabla para resaltarla. Chinchetas = plantas; círculos = paradas de cada ruta (del color de su línea); las líneas siguen la carretera cuando hay trazado guardado.</p></div>
 
 <div class="card">
   <h2>Rutas</h2>

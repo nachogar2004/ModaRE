@@ -124,6 +124,24 @@ def crear_datos_optimizador(log=print):
         log("Datos del optimizador cargados desde data/*.csv: " + ", ".join(hechos) + ".")
 
 
+def kg_semana_por_ventas(ventas_anuales_eur: float | None, P: dict | None = None) -> float:
+    """Estimación de la ropa que necesita una tienda a la semana: ventas ÷ precio medio por kg ÷ semanas de venta."""
+    P = P or parametros()
+    return round((ventas_anuales_eur or 0) / P["precio_medio_eur_kg"] / P["semanas_venta_anio"], 1)
+
+
+def completar_kg_semana(log=print):
+    """Las tiendas sin kg/semana (bases anteriores a ese campo) reciben la estimación por sus ventas."""
+    sin = Tienda.query.filter(Tienda.kg_semana.is_(None)).all()
+    if not sin:
+        return
+    P = parametros()
+    for t in sin:
+        t.kg_semana = kg_semana_por_ventas(t.ventas_anuales_eur, P)
+    db.session.commit()
+    log(f"kg/semana estimados por ventas para {len(sin)} tiendas.")
+
+
 def _fecha_en(texto: str) -> dt.date | None:
     m = re.search(r"\d{4}-\d{2}-\d{2}", str(texto))
     return dt.date.fromisoformat(m.group()) if m else None
@@ -209,7 +227,7 @@ def crear_red(rng: random.Random):
         t = Tienda(id=r.id_tienda, nombre=r.nombre, subtipo=_txt(r.subtipo), direccion=_txt(r.direccion),
                    municipio=r.municipio, provincia=r.provincia, ccaa=_txt(r.ccaa), lat=r.lat, lon=r.lon,
                    acceso_carretera=bool(r.acceso_carretera), superficie_m2=None if pd.isna(r.superficie_m2) else r.superficie_m2,
-                   categoria_tamano=cat_tam, ventas_anuales_eur=float(ventas_eur),
+                   categoria_tamano=cat_tam, ventas_anuales_eur=float(ventas_eur), kg_semana=round(kg_sem, 1),
                    dias_recepcion=_txt(r.dias_recepcion, "L-V"), ventana_inicio=_txt(r.ventana_inicio, "10:00"),
                    ventana_fin=_txt(r.ventana_fin, "14:00"), tiempo_descarga_min=int(r.tiempo_descarga_min),
                    vehiculo_max=_txt(r.vehiculo_max),

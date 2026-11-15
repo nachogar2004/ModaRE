@@ -26,7 +26,8 @@ DESCANSO_NOCTURNO_MIN = 11 * 60   # Reglamento (CE) 561/2006: descanso diario no
 KG_CO2E_POR_LITRO_DIESEL = 2.51   # ESTIMADO: DEFRA 2025, gasóleo con mezcla media de biocombustible
 PRECIO_GASOLEO_EUR_L = 1.45        # ESTIMADO: solo informativo (la tarifa €/km ya incluye combustible)
 PRECIO_CO2_EUR_T = 0.0             # Precio sombra del CO2 en la función objetivo (0 = solo coste)
-SEGUNDOS_BUSQUEDA = 30             # Tiempo máx. de búsqueda del VRP por planta (los almacenes, proporcional). Fijo en
+PLAN_ACTUAL = "ACTUAL"             # clave del único plan de la app: la red tal como está ahora (sin semanas)
+SEGUNDOS_BUSQUEDA = 30            # Tiempo máx. de búsqueda del VRP por planta (los almacenes, proporcional). Fijo en
                                    # la app; solo la CLI (optimizar.py --segundos) permite cambiarlo para pruebas
 
 # --- Solver --------------------------------------------------------------------

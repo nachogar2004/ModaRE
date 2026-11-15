@@ -21,7 +21,7 @@ from concurrent.futures import ProcessPoolExecutor
 from . import config as C
 from . import pedidos as PED
 from .asignacion import asignar, plantas_activas, tiendas_sin_almacen
-from .datos import cargar_datos, construir_visitas, construir_visitas_troncal, demanda_estimada
+from .datos import cargar_datos, construir_visitas, construir_visitas_troncal, demanda_estimada, demanda_red
 from .osrm import añadir_geometrias
 from .simulacion import flota_necesaria, simular_con_reajuste
 from .vrp import PORTAFOLIO, resolver_planta
@@ -86,27 +86,34 @@ def _kpis(rutas: list[dict]) -> dict:
     }
 
 
-def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: str = "optimo",
-               plantas_futuras: bool = False, segundos: int = 30, precio_co2: float = C.PRECIO_CO2_EUR_T,
-               solo_muestra: bool = False, paralelo: bool = True, almacenes: str = "todos", log=print) -> dict:
+def planificar(semana: str | None = None, *, fuente: str = "red", asignacion: str = "optimo",
+               plantas_futuras: bool = False, segundos: int = C.SEGUNDOS_BUSQUEDA,
+               precio_co2: float = C.PRECIO_CO2_EUR_T, solo_muestra: bool = False, paralelo: bool = True,
+               almacenes: str = "todos", log=print) -> dict:
     """
-    fuente: 'pedidos'    -> solo lo que han pedido las tiendas en la app
-            'estimacion' -> demanda estimada por ventas (sin app)
-            'mixto'      -> pedido si existe; si no, estimación (por defecto)
+    fuente: 'red'        -> los kg/semana de cada tienda activa, todas a la vez (la app; por defecto). El plan se
+                            guarda como C.PLAN_ACTUAL: una semana tipo de la red tal como está ahora
+            'pedidos'    -> solo lo pedido en la semana (ciclo semanal antiguo)
+            'estimacion' -> demanda estimada por ventas, con alternancia de semanas en las tiendas pequeñas
+            'mixto'      -> pedido si existe; si no, estimación
     segundos: tiempo de búsqueda por planta en el troncal (los almacenes usan menos, según su tamaño)
     almacenes: 'todos' -> un almacén por provincia, todos abiertos (requisito); 'optimo' -> el modelo decide cuáles abrir
     """
     t0 = time.time()
-    semana = semana or PED.semana_actual()
+    semana = semana or (C.PLAN_ACTUAL if fuente == "red" else PED.semana_actual())
     d = cargar_datos()
-    estim = demanda_estimada(d, PED.num_semana(semana))
-    peds = PED.de_semana(semana)
-    if fuente == "pedidos":
-        demanda = {k: v["kg"] for k, v in peds.items()}
-    elif fuente == "estimacion":
-        demanda = estim
+    peds = {}
+    if fuente == "red":
+        demanda = demanda_red(d)
     else:
-        demanda = {**estim, **{k: v["kg"] for k, v in peds.items()}}
+        estim = demanda_estimada(d, PED.num_semana(semana))
+        peds = PED.de_semana(semana)
+        if fuente == "pedidos":
+            demanda = {k: v["kg"] for k, v in peds.items()}
+        elif fuente == "estimacion":
+            demanda = estim
+        else:
+            demanda = {**estim, **{k: v["kg"] for k, v in peds.items()}}
     if solo_muestra:
         muestra = set(d.tiendas[d.tiendas.en_muestra == 1].id_tienda)
         demanda = {k: v for k, v in demanda.items() if k in muestra}
@@ -196,6 +203,8 @@ def planificar(semana: str | None = None, *, fuente: str = "mixto", asignacion: 
         **_kpis(rutas),
         "troncal": _kpis(tro), "reparto": _kpis(rep),
         "segundos_calculo": round(time.time() - t0, 1),
+        # los datos son los de este instante: un cambio posterior en la app deja el plan desfasado
+        "inicio_calculo": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(t0)),
     }
     # coste_eur = transporte (suma de las rutas). Los almacenes abiertos suman su fijo semanal + manipulación.
     c_fijo = (sum(u["coste_fijo_eur"] for u in uso["almacenes"].values())

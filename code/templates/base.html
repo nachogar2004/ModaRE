@@ -29,20 +29,15 @@
       <b>ReMode Studio</b><small>Transporte</small></a>
     <nav class="nav">
       {% if current_user.rol == 'admin' %}
-      <div class="nav-group"><span>Operación</span>
-        {{ enlace(url_for('admin.panel'), 'home', 'Panel', ruta == '/admin/') }}
-        {{ enlace(url_for('admin.planificacion'), 'calendar', 'Planificación', ruta.startswith('/admin/planificacion')) }}
-        {{ enlace(url_for('admin.pedidos'), 'box', 'Pedidos', ruta.startswith('/admin/pedidos')) }}
-        {{ enlace(url_for('admin.movimientos'), 'activity', 'Movimientos', ruta.startswith('/admin/movimientos')) }}
+      <div class="nav-group"><span>Rutas</span>
+        {{ enlace(url_for('admin.resumen'), 'activity', 'Panel', ruta.startswith('/admin/resumen')) }}
+        {{ enlace(url_for('admin.panel'), 'route', 'Calcular rutas', ruta == '/admin/') }}
+        {{ enlace(url_for('plan'), 'map', 'Mapa y analítica', ruta.startswith('/central/plan')) }}
       </div>
       <div class="nav-group"><span>Red</span>
-        {{ enlace(url_for('admin.lista', ent='tiendas'), 'store', 'Tiendas', ruta.startswith('/admin/tiendas') or ruta.startswith('/tienda/')) }}
-        {{ enlace(url_for('admin.lista', ent='plantas'), 'factory', 'Plantas', ruta.startswith('/admin/plantas') or ruta.startswith('/planta/')) }}
-        {{ enlace(url_for('admin.lista', ent='almacenes'), 'warehouse', 'Almacenes', ruta.startswith('/admin/almacenes') or ruta.startswith('/almacen/')) }}
-      </div>
-      <div class="nav-group"><span>Flota</span>
-        {{ enlace(url_for('admin.lista', ent='camiones-troncal'), 'truck', 'Camiones troncales', ruta.startswith('/admin/camiones-troncal')) }}
-        {{ enlace(url_for('admin.lista', ent='camiones-reparto'), 'van', 'Camiones de reparto', ruta.startswith('/admin/camiones-reparto')) }}
+        {{ enlace(url_for('admin.lista', ent='tiendas'), 'store', 'Tiendas', ruta.startswith('/admin/tiendas')) }}
+        {{ enlace(url_for('admin.lista', ent='plantas'), 'factory', 'Plantas', ruta.startswith('/admin/plantas')) }}
+        {{ enlace(url_for('admin.lista', ent='almacenes'), 'warehouse', 'Almacenes', ruta.startswith('/admin/almacenes')) }}
       </div>
       <div class="nav-group"><span>Optimizador</span>
         {{ enlace(url_for('admin.lista', ent='parametros'), 'sliders', 'Parámetros', ruta.startswith('/admin/parametros')) }}
@@ -51,8 +46,6 @@
       </div>
       <div class="nav-group"><span>Sistema</span>
         {{ enlace(url_for('admin.lista', ent='usuarios'), 'users', 'Usuarios', ruta.startswith('/admin/usuarios')) }}
-        {{ enlace(url_for('admin.lista', ent='categorias'), 'tag', 'Categorías de prenda', ruta.startswith('/admin/categorias')) }}
-        {{ enlace(url_for('central'), 'map', 'Optimizador avanzado', ruta.startswith('/central')) }}
       </div>
       {% else %}
       {% set icono_rol = {'tienda': 'store', 'planta': 'factory', 'almacen': 'warehouse'}[current_user.rol] %}

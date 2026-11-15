@@ -21,8 +21,9 @@ Hay que decidir:
 minimizando el coste (y opcionalmente el CO₂) y cumpliendo ventanas de recepción, capacidades y
 las reglas de los conductores (**pausa de 20 min cada 200 km**, jornada y descanso nocturno).
 
-Flujo de negocio que implementa el prototipo:
-**los dueños de las tiendas piden en la app → al final de la semana la central optimiza → salen las rutas.**
+Flujo que implementa el prototipo (sin semanas ni pedidos):
+**el admin describe la red actual en la app (tiendas con sus kg/semana, plantas, almacenes, parámetros) → pulsa
+«Calcular rutas» → sale un único plan (semana tipo) con todas las tiendas activas.**
 
 ## Datos (`data/` = semilla; la fuente de verdad es la base de datos)
 
@@ -48,7 +49,8 @@ parámetros, vehículos y tarifas). Respetadlas al presentar.
 | `geometrias_osrm.json` | caché de trazados por carretera de cada tramo (polyline) para el mapa | se rellena sola al guardar un plan |
 | `parametros.csv` | todos los supuestos de negocio (kg/palé, frecuencias, jornada, días máx. de ruta, `tipos_troncal`…) | semilla de la tabla `parametros`: **cambiad los supuestos en Admin → Parámetros**, no en el código |
 
-Demanda por defecto (si la tienda no pide): `kg_semana = ventas / precio_medio_eur_kg / semanas_venta_anio`
+Demanda: cada tienda tiene en la base un **`kg_semana` editable** (lo que reparte el optimizador, fuente `red`); se
+inicializa con `kg_semana = ventas / precio_medio_eur_kg / semanas_venta_anio`
 (~34 t/semana en total frente a 46 t de capacidad de las 4 plantas activas).
 
 ## Modelo de optimización
@@ -172,8 +174,8 @@ python -m venv .venv
 .venv\Scripts\python -m pip install -r requirements.txt
 .venv\Scripts\python generar_almacenes.py                                         # solo para rehacer la semilla data/almacenes.csv
 .venv\Scripts\python calcular_distancias.py                                       # distancias de puntos nuevos/movidos (o botón en la app)
-.venv\Scripts\python optimizar.py --muestra --fuente estimacion --segundos 10   # prueba rápida (~15 s)
-.venv\Scripts\python optimizar.py --semana 2026-W47 --segundos 30               # red completa (~60 s)
+.venv\Scripts\python optimizar.py --muestra --segundos 10                      # prueba rápida (~25 s)
+.venv\Scripts\python optimizar.py                                                 # plan de la red actual (= botón de la app, ~75 s)
 .venv\Scripts\python app.py                                                      # http://127.0.0.1:5000
 .venv\Scripts\python -m gestion.semilla --reset                                 # rehace gestion.db desde data/*.csv
 ```
@@ -210,56 +212,36 @@ La primera ejecución tarda ~1 min más porque pide a OSRM el trazado de cada ru
 en línea recta y sin almacenes; para una comparación justa habría que recalcularlo con los datos actuales. Los camiones
 físicos del reparto se cuentan por almacén (cada almacén necesita al menos uno).
 
-## App de gestión «ReMode Studio» (`code/gestion/`, BD única en `MODARE_DB`; en desarrollo `code/gestion.db`)
+## App «ReMode Studio» (`code/gestion/`, BD única en `MODARE_DB`; en desarrollo `code/gestion.db`)
 
-Aplicación web con login por roles sobre la misma app Flask. La BD (SQLite, SQLAlchemy) se crea y se rellena
-sola desde `data/*.csv` la primera vez que se arranca `app.py` (`gestion/semilla.py`); desde entonces es la única
-fuente de datos, también del optimizador: lo que se cambia en la app entra en la siguiente optimización.
+Aplicación web **solo para el administrador** (las cuentas de tienda/planta/almacén no pueden entrar) sobre la misma
+app Flask. **No trabaja por semanas**: edita la red y pulsa **Calcular rutas** (página de inicio, `admin.panel`) →
+`gestion/optimizador.py:calcular_rutas()` → `planificar(C.PLAN_ACTUAL, fuente="red")` en un hilo → plan único guardado
+en `planes` con la clave **`ACTUAL`** (cada cálculo sustituye al anterior; 30 s/planta y CO₂ sin precio, fijos en
+`config.py`). La página avisa si la red cambió después de que empezara el último cálculo (`ajustes.red_cambiada` frente a
+`resumen.inicio_calculo`) y si hay puntos nuevos/movidos sin distancias por carretera. Mapa y analítica en `/central/plan`.
 
-| Rol | Usuario | Qué ve y hace |
-|---|---|---|
-| **Tienda** | `td-001`… | Stock en **prendas** por segmento (Mujer/Hombre/Niños) × tipo (arriba, abajo, abrigos, zapatos, bolsos) con días de cobertura; registra **ventas**; **poner/quitar prendas** (ajuste de inventario); configura su **pedido automático** (diario L-V / semanal / mensual, día, días de seguridad); hace **pedidos adicionales**; confirma la recepción |
-| **Planta** | `pl-mad`… | Stock en prendas por categoría y **stock máximo**; entradas de clasificación; **expide** las reposiciones a almacenes (descuenta stock); sus camiones troncales y rutas |
-| **Almacén** | `al-madrid`… | Stock en **cajas mixtas** frente a su **máximo** (alerta si lo supera, también con lo previsto); **recibe** reposiciones; **carga** los pedidos de tienda en el camión de reparto |
-| **Admin** | `admin` | Todo: alta/baja/edición de usuarios, tiendas, plantas, almacenes (incl. sus costes), camiones troncales, camiones de reparto y categorías; edición de los **datos del optimizador** (parámetros, tipos de vehículo y tarifas: sin altas ni bajas); ve pedidos, movimientos de stock y alertas; planificación semanal y cálculo de distancias de puntos nuevos o movidos |
+Menú: **Rutas** (Panel = inicio con gráficas del estado actual, `admin.resumen` + `templates/gestion/admin_resumen.html`,
+en HTML/CSS sin librerías y con la paleta categórica de referencia; calcular; mapa) · **Red** (tiendas con `kg_semana`, plantas, almacenes con costes; vetos en sus fichas) ·
+**Optimizador** (parámetros, tipos de vehículo, tarifas: solo edición) · **Usuarios**. La BD se crea y se rellena sola
+desde `data/*.csv` la primera vez que se arranca `app.py` (`gestion/semilla.py`); desde entonces es la única fuente.
 
 **Datos**: una sola base de datos (SQLAlchemy; SQLite en desarrollo, PostgreSQL en producción) para la app y la
-librería: el plan de cada semana se guarda en la tabla `planes` (salidas/ es solo copia) y el estado de las
-optimizaciones en `trabajos_optimizacion`. Esquema con migraciones (`flask --app app db migrate/upgrade`);
-no tocar el esquema a mano. Despliegue y variables: §12 de la guía.
+librería. Esquema con migraciones (`flask --app app db migrate/upgrade`); no tocar el esquema a mano. Despliegue y
+variables: §10 de la guía. Guía de uso: [docs/guia_app.md](docs/guia_app.md).
+No hay asociaciones fijas tienda→almacén ni almacén→planta; solo **vetos** (`almacen_plantas_vetadas`,
+`tienda_almacenes_vetados`), que el optimizador respeta.
 
-Guía de uso completa: [docs/guia_app.md](docs/guia_app.md). No hay asociaciones fijas tienda→almacén ni almacén→planta: el optimizador decide cada semana.
-Solo hay **vetos** (tablas `almacen_plantas_vetadas` y `tienda_almacenes_vetados`), que deciden la tienda y el almacén en su panel;
-el optimizador los lee de la base y la asignación los respeta.
+**Tablas en uso**: `tiendas` (con `kg_semana`), `plantas`, `almacenes`, vetos, `parametros`, `tipos_vehiculo`,
+`tarifas`, `distancias`, `planes`, `trabajos_optimizacion`, `usuarios`, `ajustes`. La librería las lee por nombre en
+`modare/datos.py`: si se renombra una columna, adaptarla allí. Borrar una tienda la elimina (sus ventas sintéticas
+de la semilla se van con ella); si tiene historial operativo se da de baja.
 
-Contraseñas iniciales: `admin`/`admin` y `modare2026` para el resto (variables `MODARE_PASSWORD_ADMIN`,
-`MODARE_PASSWORD_INICIAL`; `MODARE_SECRET_KEY` para la sesión). Al dar de alta una tienda/planta/almacén se crea
-su usuario con contraseña aleatoria. Borrar algo con historial lo **da de baja** (se conserva el histórico).
-
-**Tablas** (`gestion/modelos.py`): `usuarios`, `categorias`, `plantas` + `stock_planta`, `almacenes`, `tiendas` +
-`stock_tienda`, `ventas`, `pedidos` + `lineas_pedido`, `camiones_troncal` (planta→almacén), `camiones_reparto`
-(almacén→tienda), `viajes` (rutas del plan con su camión), `reposiciones` + `lineas_reposicion` (envío troncal),
-`movimientos` (auditoría de stock), `ajustes`; datos del optimizador: `parametros`, `tipos_vehiculo` (con emisiones),
-`tarifas`, `distancias` (además de la red y los vetos). La librería las lee por nombre en `modare/datos.py`: si se
-renombra una columna, adaptarla allí.
-
-**Pedido automático** (`gestion/logistica.py`): en el día que toca, por categoría,
-`venta media diaria (4 semanas) × (días del periodo + días de seguridad) − stock − pedido en camino`;
-no se genera si pesa menos de media caja. Se generan solos con la primera petición del día (y botón en el panel admin).
-Lo pedido de lunes a viernes se entrega la semana siguiente (cierre el viernes).
-
-**Ciclo semanal** (Admin → Planificación): 1) *cerrar semana* → pedidos `confirmado` y suma por tienda en
-`modare.pedidos` (lo que lee el optimizador); 2) *optimizar* → `gestion/optimizador.py` ejecuta `planificar(fuente="pedidos")`
-(que lee la red y los parámetros de la base en ese momento) e **importa el plan**: crea los viajes, asigna a cada ruta
-un camión libre de su base (mismo tipo o el más pequeño con capacidad; editable a mano) y crea una reposición por almacén
-con la mezcla de prendas de sus pedidos; 3) planta expide → almacén recibe (+cajas) → almacén carga (−cajas) →
-tienda recibe (+prendas). **`gestion/optimizador.py` es el único módulo que conoce la librería de rutas**: si cambia, solo se adapta ese.
-
-Supuestos SINTÉTICOS de la semilla (editables en la app): peso y precio por prenda de cada categoría, stock inicial
-(planta 60 % del máximo = 3 semanas de salida; almacén 25 % de un máximo = 2 semanas de capacidad; tienda ≈ 4 días de venta),
-8 semanas de ventas simuladas a partir de `ventas_periodo`, frecuencia de pedido (pequeñas mensual, resto semanal el jueves)
-y flota (3 camiones troncales por planta + tráiler en BCN; 1 furgoneta por almacén + rígido 7,5 t si ≥ 3.000 kg/semana).
-Pendiente: el plan troncal y el reparto se ejecutan la misma semana en la app (el optimizador supone stock W → reparto W+1).
+**Parte operativa antigua, fuera de la interfaz** (código y tablas conservados por si se recupera): ciclo semanal
+de pedidos automáticos/adicionales (`gestion/logistica.py`), stock en prendas y cajas, ventas, categorías de prenda,
+flota de camiones, viajes, reposiciones y movimientos; paneles de tienda/planta/almacén (`gestion/vistas_red.py`),
+`/admin/planificacion` y `/central` (siguen accesibles por URL para el admin, sin enlaces). La CLI conserva las
+fuentes por semanas (`--fuente pedidos|estimacion|mixto --semana …`).
 
 ## Supuestos y limitaciones (decidlos/validadlos con la ONG)
 - **Almacenes inventados** (qué polígono, capacidad, horario): ver `almacenes.csv`, `modare/poligonos.py` y `generar_almacenes.py`.

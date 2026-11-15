@@ -57,12 +57,13 @@ def preparar_bd(log=print):
         upgrade(directory=str(DIR_MIGRACIONES))
     elif "alembic_version" not in tablas:
         raise RuntimeError("La base de datos está vacía y MODARE_AUTO_MIGRAR=0: ejecuta «flask --app app db upgrade».")
-    from .semilla import completar_red_desde_csv, crear_datos_optimizador, sembrar
+    from .semilla import completar_kg_semana, completar_red_desde_csv, crear_datos_optimizador, sembrar
     if not db.session.query(Categoria.id).first():
         sembrar(log)
     # bases creadas antes de que el optimizador leyera de la base: se completan una vez desde data/*.csv
     crear_datos_optimizador(log)
     completar_red_desde_csv(log)
+    completar_kg_semana(log)
     _importar_pedidos_db_antiguo(log)
 
 
